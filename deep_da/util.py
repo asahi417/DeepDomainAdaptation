@@ -1,7 +1,6 @@
 import os
 import logging
 import json
-import numpy as np
 from glob import glob
 
 
@@ -52,11 +51,16 @@ def checkpoint_version(checkpoint_dir: str,
             raise ValueError('Checkpoints are duplicated')
 
 
-def create_log(out_file_path=None):
+def create_log(out_file_path: str=None):
     """ Logging
-        If `out_file_path` is None, only show in terminal
-        or else save log file in `out_file_path`
-    Usage
+    If `out_file_path` is None, only show in terminal or else save log file in `out_file_path`. To avoid duplicate log,
+    use one if exist.
+
+     Parameter
+    ------------------
+    out_file_path: path to output log file
+
+     Usage
     -------------------
     logger.info(message)
     logger.error(error)
@@ -64,8 +68,8 @@ def create_log(out_file_path=None):
 
     # handler to record log to a log file
     if out_file_path is not None:
-        # if os.path.exists(out_file_path):
-        #     os.remove(out_file_path)
+        if os.path.exists(out_file_path):
+            os.remove(out_file_path)
         logger = logging.getLogger(out_file_path)
 
         if len(logger.handlers) > 1:  # if there are already handler, return it
@@ -102,92 +106,3 @@ def create_log(out_file_path=None):
             logger.addHandler(handler)
             return logger
 
-
-# class LearningRateScheduler:
-#     """
-#     Learning rate scheduler. Updates the learning rate when no significant improvement has been made in the last
-#     `patience` steps.
-#     """
-#
-#     def __init__(self,
-#                  initial_learning_rate: float,
-#                  method: str = None,
-#                  learning_rate_multiplier: float=0.2,
-#                  minimal_learning_rate: float=0.0,
-#                  threshold_multiplier=1.0005,
-#                  patience=20,
-#                  ):
-#         """
-#         Parameters
-#         ----------
-#         method:
-#             'epoch' (decay by epoch), 'loss' (decay by loss) if None -> no decay
-#         minimal_learning_rate:
-#             The training should stop when the learning rate is below `minimal_learning_rate`.
-#         threshold_multiplier: (method 'loss')
-#             Threshold multiplier used to check if learning rate should be updated or not.
-#         patience: (method 'loss')
-#             Lookback window to check if the learning rate should be updated or not.
-#         """
-#
-#         self.method = method
-#         self.initial_lr = initial_learning_rate
-#         self.current_learning_rate = initial_learning_rate
-#         self.learning_rate_multiplier = learning_rate_multiplier
-#         self.minimal_learning_rate = minimal_learning_rate
-#         self.stop = False
-#
-#         # parameter for method 'loss'
-#         self.threshold_multiplier = threshold_multiplier
-#         self.patience = patience
-#         self.evaluations_since_last_decrease = 0
-#         self.loss_sequence = []
-#
-#     def __call__(self, *args, **kwargs):
-#         """
-#         Returns
-#         -------
-#         (current_learning_rate, stop): (float, bool)
-#             `current_learning_rate` is the updated learning rate which should be used in the next training step.
-#             `stop` is a boolean which tells whether to stop training or not.
-#         """
-#         if self.method == 'epoch':
-#             return self.__epoch()
-#         elif self.method == 'loss':
-#             return self.__loss(*args, **kwargs)
-#         else:
-#             return self.__identity()
-#
-#     def __epoch(self):
-#         """Decay by epoch"""
-#         self.current_learning_rate = self.current_learning_rate * self.learning_rate_multiplier
-#         if self.current_learning_rate <= self.minimal_learning_rate:
-#             self.stop = True
-#         return self.current_learning_rate, self.stop
-#
-#     def __loss(self, loss):
-#         """Decay by loss"""
-#         self.loss_sequence.append(loss)
-#
-#         self.evaluations_since_last_decrease += 1
-#         if self.evaluations_since_last_decrease > self.patience * 2:
-#
-#             current_mean = np.mean(self.loss_sequence[-self.patience:])
-#             previous_mean = np.mean(self.loss_sequence[-self.patience * 2:-self.patience])
-#             mean_not_decreased = current_mean >= previous_mean * self.threshold_multiplier
-#
-#             current_median = np.median(self.loss_sequence[-self.patience:])
-#             previous_median = np.median(self.loss_sequence[-self.patience * 2:-self.patience])
-#             median_not_decreased = current_median >= previous_median * self.threshold_multiplier
-#
-#             if mean_not_decreased and median_not_decreased:
-#                 self.current_learning_rate *= self.learning_rate_multiplier
-#                 self.evaluations_since_last_decrease = 0
-#
-#                 if self.current_learning_rate <= self.minimal_learning_rate:
-#                     self.stop = True
-#
-#         return self.current_learning_rate, self.stop
-#
-#     def __identity(self):
-#         return self.current_learning_rate, False

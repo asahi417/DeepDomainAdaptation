@@ -14,7 +14,7 @@ pip install .
 ```
 
 ## List of Models
-- Domain Adversarial Training [paper](https://arxiv.org/pdf/1505.07818.pdf)
+- Domain Adversarial Training [[paper](https://arxiv.org/pdf/1505.07818.pdf), [implementation](./deep_da/model/dann.py)]
 
 ## About Datasets (sentiment analysis dataset)
 - Amazon Reviews

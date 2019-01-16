@@ -17,7 +17,7 @@ setup(
     include_package_data=True,
     test_suite='tests',
     install_requires=[
-        'tensorflow-gpu==1.10.1',
+        'tensorflow-gpu',
         'gensim',
         'numpy',
         'pandas',
