@@ -9,9 +9,9 @@ build
 *.egg-info
 dist
 
-./word_embeddings
-./checkpoint
-./dataset
-./tfrecord
-./bin
+word_embeddings
+checkpoint
+dataset
+tfrecord
+bin
 
