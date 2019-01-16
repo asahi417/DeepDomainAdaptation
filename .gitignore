@@ -1,0 +1,17 @@
+.DS_Store
+__pycache__/
+*.ipynb_checkpoints
+nohup.out
+.python-version
+*.pyc
+.idea
+build
+*.egg-info
+dist
+
+./word_embeddings
+./checkpoint
+./dataset
+./tfrecord
+./bin
+

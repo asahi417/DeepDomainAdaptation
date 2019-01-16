@@ -1,0 +1,30 @@
+is_image=true
+domain_adversarial_reg=1.0
+#domain_adversarial_reg=0.0
+learning_rate=0.01
+batch=128
+optimizer='momentum'
+weight_decay=1e-6
+keep_prob=0.5
+
+[config_scheduler_learning_rate]
+identity=true
+#multiplier=0.04  # 10/150
+#power=0.75
+
+[config_scheduler_reg]
+#multiplier=0.1
+#multiplier=0.04  # 10/150
+multiplier=0.001
+
+[config_feature_extractor]
+cnn_channel=[64, 64, 128]
+cnn_filter=[5, 5, 5]
+cnn_stride=[2, 2, 2]
+
+[config_domain_classifier]
+n_hidden=[1024, 1024]
+
+[config_model]
+n_hidden=[3072, 2048]
+

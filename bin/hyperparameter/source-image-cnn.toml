@@ -1,0 +1,20 @@
+model_name='image-cnn'
+learning_rate=2e-4
+batch=500
+optimizer='adam'
+weight_decay=1e-8
+#keep_prob=0.8
+
+[config_scheduler_learning_rate]
+identity=true
+#multiplier=0.04  # 10/150
+#power=0.75
+
+[config_feature_extractor]
+cnn_channel=[32, 32, 64, 64, 128, 128]
+cnn_filter=[3, 3, 3, 3, 3, 3]
+cnn_stride=[2, 2, 2, 2, 2, 2]
+fc_n_hidden=128
+
+[config_model]
+output_size=10
