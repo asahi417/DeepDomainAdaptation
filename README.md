@@ -5,7 +5,7 @@
 Tensorflow implementation of deep learning based domain adaptation models. 
 
 
-## Setup
+## Get started
 
 ```
 git clone https://github.com/asahi417/DeepDomainAdaptation
@@ -13,19 +13,31 @@ cd DeepDomainAdaptation
 pip install .
 ```
 
-## List of Models
-- Domain Adversarial Training [[paper](https://arxiv.org/pdf/1505.07818.pdf), [implementation](./deep_da/model/dann.py)]
+## Script
+### `bin/script_tfrecord.py`
 
-## About Datasets (sentiment analysis dataset)
-- Amazon Reviews
-    - [Original](http://jmcauley.ucsd.edu/data/amazon/)(the original data requires documentations to download)
-    - Without category
-        - Used in sentiment analysis context ([Zhang et al, 2016](https://arxiv.org/pdf/1509.01626.pdf))
-        - [download](https://github.com/zhangxiangxiao/Crepe/tree/master/data)
-    - With category
-        - Used in domain adaptation context ([Chen et al, 2012](https://arxiv.org/pdf/1206.4683.pdf))
-        - [download](https://www.cs.jhu.edu/~mdredze/datasets/sentiment/)
-- Yelp data
-    - [original](https://www.yelp.com/dataset)
-    - [processed as csv](https://github.com/zhangxiangxiao/Crepe/tree/master/data)
+Script to build tfrecord files.
+
+```
+usage: script_tfrecord.py [-h] --data [DATA]
+
+This script is ...
+
+optional arguments:
+  -h, --help     show this help message and exit
+  --data [DATA]  dataset name in dict_keys(['mnist', 'svhn'])
+```
+
+Environment variables:
+
+| Environment variable name              | Default                                   | Description         |
+| -------------------------------------- | ----------------------------------------- | ------------------- |
+| **PATH_TO_CONFIG**                     | `./bin/config.json`                       | path to config file |
+
+
+## List of Models
+- Domain Adversarial Neural Network [[paper](https://arxiv.org/pdf/1505.07818.pdf), [implementation](./deep_da/model/dann.py)]
+- Deep Joint Distribution Optimal Transport [[paper](https://arxiv.org/pdf/1803.10081.pdf), [implementation](./deep_da/model/jdot.py)]
+
+
 

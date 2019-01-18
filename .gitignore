@@ -14,4 +14,3 @@ checkpoint
 dataset
 tfrecord
 bin
-config.json

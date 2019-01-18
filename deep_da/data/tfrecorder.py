@@ -94,25 +94,22 @@ class TFRecorder:
         self.__logger.info('Completed :)')
 
     @staticmethod
-    def read_tf(dataset_name: str,
-                dir_to_tfrecord: str):
+    def read_tf(dir_to_tfrecord: str,
+                is_image: bool):
         """ Get instance to be used in tensorflow graph
 
          Parameter
         ---------------------
-        dataset_name: a name of dataset
         dir_to_tfrecord: path to directory where tfrecord files are saved (same as `dir_to_save` when create files)
+        is_image: if the data linked to `dir_to_tfrecord` is image or not
         """
-
-        raise_error(dataset_name not in VALID_DATA.keys(),
-                    'unknown data %s not in %s' % (dataset_name, str(VALID_DATA.keys())))
 
         meta_dict = json.load(open('%s/meta.json' % dir_to_tfrecord))
 
         lookup_label = json.load(open('%s/lookup_label.json' % dir_to_tfrecord))
         lookup_label_inv = dict((i, k) for k, i in lookup_label.items())
 
-        if VALID_DATA[dataset_name]['is_image']:
+        if is_image:
             def __read_tf(example_proto):
                 features = dict(
                     image=tf.FixedLenFeature((), tf.string, default_value=""),
@@ -130,7 +127,6 @@ class TFRecorder:
         else:
             raise ValueError('TODO !!!!')
 
-        meta_dict['is_image'] = VALID_DATA[dataset_name]['is_image']
         meta_dict['lookup_label'] = lookup_label
         meta_dict['lookup_label_inv'] = lookup_label_inv
         return __read_tf, meta_dict

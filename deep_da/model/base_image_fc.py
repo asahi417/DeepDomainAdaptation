@@ -3,7 +3,7 @@ import tensorflow as tf
 from . import util_tf
 
 """
-Models used in dann paper
+Models used in DANN paper
 """
 
 

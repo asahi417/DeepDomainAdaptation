@@ -1,118 +1,62 @@
+""" Domain Adversarial Neural Network
+
+Tensorflow implementation of adversarial training based domain adaptation model described in:
+    Ganin, Yaroslav, et al.
+    "Domain-adversarial training of neural networks."
+    The Journal of Machine Learning Research 17.1 (2016): 2096-2030.
+"""
+
 import os
 import numpy as np
 import tensorflow as tf
-from ..util import create_log
-from ..data_processing import TFRecorder
-from . import base_image_fc as image_model_fc
-from . import base_image_cnn as image_model_cnn
-from .step_scheduler import StepScheduler
-from .util_tf import variable_summaries, FlipGradientBuilder
+from .util_tf import variable_summaries, FlipGradientBuilder, StepScheduler, VALID_BASIC_CELL
+from ..util import create_log, raise_error
+from ..data import TFRecorder
+
+
+TFR = TFRecorder()
 
 
 class DANN:
-    """ Domain Adversarial Neural Network """
+    """ Domain Adversarial Neural Network
+    
+     Usage
+    -----------
+    >>> import deep_da
+    >>> model_instance = deep_da.model.DANN()
+    >>> # train model
+    >>> model_instance.train(epoch=10)
+
+    """
 
     def __init__(self,
-                 model_name: str,
-                 domain_adversarial_reg: float,
                  checkpoint_dir: str,
+                 regularizer_config_domain_classification: dict,
+                 regularizer_config_feature_extraction: dict,
+                 learning_rate_config: dict,
                  path_to_tfrecord_source: str,
                  path_to_tfrecord_target: str,
                  config_feature_extractor: dict=None,
                  config_domain_classifier: dict=None,
                  config_model: dict=None,
-                 learning_rate: float = None,
-                 # gradient_clip: float = None,
                  batch: int = 10,
                  optimizer: str = 'sgd',
                  weight_decay: float = 0.0,
                  keep_prob: float = 1.0,
-                 debug: bool = True,
                  n_thread: int = 4,
                  ckpt_epoch: int = None,
                  initializer: str='variance_scaling',
                  batch_for_test: int=1000,
-                 config_scheduler_learning_rate: dict=None,
-                 config_scheduler_reg: dict = None):
-        """
+                 is_image: bool = True,
+                 base_component: str = 'cnn',
+                 warm_start: bool = True
+                 ):
 
-        :param domain_adversarial_reg: regularization parameter for domain adversarial loss
-        :param checkpoint_dir:
-        :param path_to_tfrecord_source:
-        :param path_to_tfrecord_target:
-        :param learning_rate:
-        :param batch:
-        :param optimizer:
-        :param weight_decay:
-        :param keep_prob:
-        :param debug:
-        :param n_thread:
-        :param ckpt_epoch:
-        :param initializer:
-        :param batch_for_test:
-        """
+        self.__is_image = is_image
 
-        self.__domain_adversarial_flg = domain_adversarial_reg != 0.0
-        self.__domain_adversarial_domain = domain_adversarial_reg
-
-        self.__checkpoint_dir = checkpoint_dir
-        if ckpt_epoch is None:
-            self.__checkpoint = '%s/model.ckpt' % checkpoint_dir
-        else:
-            self.__checkpoint = '%s/model-%i.ckpt' % (checkpoint_dir, ckpt_epoch)
-
-        # hyper parameters
-        self.__ini_learning_rate = learning_rate
-        # self.__clip = gradient_clip
-        self.__batch = batch
-        self.__optimizer = optimizer
-        self.__weight_decay = weight_decay
-        self.__keep_prob = keep_prob
-        self.__logger = create_log('%s/log' % self.__checkpoint_dir) if debug else None
-
-        self.__is_image = 'image' in model_name
         # tfrecorder
-        self.__recorder_source = TFRecorder(path_to_tfrecord_source, debug=False, is_image=self.__is_image)
-        self.__recorder_source.load_statistics()
-        self.__recorder_target = TFRecorder(path_to_tfrecord_target, debug=False, is_image=self.__is_image)
-        self.__recorder_target.load_statistics()
-
-        if self.__is_image:
-            # resize (data from source and target should have same sized image)
-            if self.__recorder_target.image_shape[0] == self.__recorder_source.image_shape[0]:
-                self.__resize = self.__recorder_target.image_shape[0]
-            elif self.__recorder_target.image_shape[0] < self.__recorder_source.image_shape[0]:
-                self.__resize = self.__recorder_source.image_shape[0]
-            else:
-                raise ValueError('source data should be larger than target.')
-
-            # tile channel (data from source and target should have same channeled image)
-            if self.__recorder_target.image_shape[2] == self.__recorder_source.image_shape[2]:
-                self.__tile_channel = False
-            elif self.__recorder_target.image_shape[2] == 1 and self.__recorder_source.image_shape[2] == 3:
-                self.__tile_channel = True
-            else:
-                raise ValueError('Channel size is wired: channel of source image >= channel'
-                                 'of target image and both should be 1 or 3.')
-
-            # get models
-            if model_name == 'image-cnn':
-                image_model = image_model_cnn
-            elif model_name == 'image-fc':
-                image_model = image_model_fc
-            else:
-                raise ValueError('unknown model')
-
-            self.__feature_extractor = image_model.FeatureExtractor(
-                [self.__resize, self.__resize, self.__recorder_source.image_shape[2]],
-                **config_feature_extractor
-            )
-            self.__domain_classifier = image_model.DomainClassifier(**config_domain_classifier)
-            self.__model = image_model.Model(**config_model)
-
-        else:
-            raise ValueError('unknown mode')
-
+        self.__read_tf_src, self.__meta_src = TFR.read_tf(dir_to_tfrecord=path_to_tfrecord_source, is_image=is_image)
+        self.__read_tf_tar, self.__meta_tar = TFR.read_tf(dir_to_tfrecord=path_to_tfrecord_target, is_image=is_image)
         self.__path_to_tfrecord = dict(
             source=dict(
                 train='%s/train.tfrecord' % path_to_tfrecord_source,
@@ -124,36 +68,76 @@ class DANN:
             )
         )
 
+        # basic structure
+        if is_image:
+            raise_error(base_component not in VALID_BASIC_CELL['image'].keys(),
+                        'invalid base_component: %s not in %s' % (base_component, VALID_BASIC_CELL['image'].keys()))
+            base_model = VALID_BASIC_CELL['image'][base_component]
+            
+            # resize width and height to be fit smaller one (source and target)
+            self.__resize = int(np.min(self.__meta_src.image_shape[0:2] + self.__meta_tar.image_shape[0:2]))
+
+            # tile channel to be fit larger one (source and target)
+            raise_error(self.__meta_src.image_shape[-1] not in [1, 3] or self.__meta_tar.image_shape[-1] not in [1, 3],
+                        'invalid shape: tar %s, src %s' % (self.__meta_tar.image_shape, self.__meta_src.image_shape))
+            if self.__meta_tar.image_shape[-1] == self.__meta_src.image_shape[-1]:
+                self.__tile_channel = None
+            elif self.__meta_tar.image_shape[-1] > self.__meta_src.image_shape[-1]:
+                self.__tile_channel = 'src'
+            else:
+                self.__tile_channel = 'tar'
+            self.__channel = max(self.__meta_tar.image_shape[-1], self.__meta_src.image_shape[-1]) 
+
+            # model configuration
+            self.__feature_extractor = base_model.FeatureExtractor([self.__resize, self.__resize, self.__channel],
+                                                                   **config_feature_extractor)
+            self.__domain_classifier = base_model.DomainClassifier(**config_domain_classifier)
+            self.__model = base_model.Model(**config_model)
+        else:
+            raise ValueError('TBA')
+            
+        # checkpoint
+        if ckpt_epoch is None:
+            self.__checkpoint = '%s/model.ckpt' % checkpoint_dir
+        else:
+            self.__checkpoint = '%s/model-%i.ckpt' % (checkpoint_dir, ckpt_epoch)
+
+        # training parameters
+        self.__batch = batch
+        self.__optimizer = optimizer
+        self.__weight_decay = weight_decay
+        self.__keep_prob = keep_prob
         self.__n_thread = n_thread
         self.__initializer = initializer
         self.__batch_for_test = batch_for_test
-        self.__scheduler_lr = config_scheduler_learning_rate
-        self.__scheduler_reg = config_scheduler_reg
 
-        self.__log('BUILD DANN GRAPH')
+        self.__lr_config = learning_rate_config
+        self.__reg_config_dc = regularizer_config_domain_classification
+        self.__reg_config_fe = regularizer_config_feature_extraction
+
+        self.__logger = create_log('%s/log' % checkpoint_dir)
+
+        self.__logger.info('BUILD DANN GRAPH')
         self.__build_graph()
 
         self.__session = tf.Session(config=tf.ConfigProto(log_device_placement=False))
 
         self.__writer_train = \
-            tf.summary.FileWriter('%s/summary_train' % self.__checkpoint_dir, self.__session.graph)
+            tf.summary.FileWriter('%s/summary_train' % checkpoint_dir, self.__session.graph)
         self.__writer_valid = \
-            tf.summary.FileWriter('%s/summary_valid' % self.__checkpoint_dir, self.__session.graph)
+            tf.summary.FileWriter('%s/summary_valid' % checkpoint_dir, self.__session.graph)
         self.__writer_valid_tar_train = \
-            tf.summary.FileWriter('%s/summary_valid_tar_train' % self.__checkpoint_dir, self.__session.graph)
+            tf.summary.FileWriter('%s/summary_valid_tar_train' % checkpoint_dir, self.__session.graph)
         self.__writer_valid_tar_valid = \
-            tf.summary.FileWriter('%s/summary_valid_tar_valid' % self.__checkpoint_dir, self.__session.graph)
+            tf.summary.FileWriter('%s/summary_valid_tar_valid' % checkpoint_dir, self.__session.graph)
 
-        # self.__writer_train = tf.summary.FileWriter('%s/summary_train' % self.__checkpoint_dir, self.__session.graph)
-        # self.__writer_valid = tf.summary.FileWriter('%s/summary_valid' % self.__checkpoint_dir, self.__session.graph)
-
-        # Load model
-        if os.path.exists('%s.meta' % self.__checkpoint):
-            self.__log('load variable from %s' % self.__checkpoint)
+        # load model
+        if os.path.exists('%s.meta' % self.__checkpoint) and warm_start:
+            self.__logger.info('load variable from %s' % self.__checkpoint)
             self.__saver.restore(self.__session, self.__checkpoint)
             self.__warm_start = True
         else:
-            os.makedirs(self.__checkpoint_dir, exist_ok=True)
+            os.makedirs(checkpoint_dir, exist_ok=True)
             self.__session.run(tf.global_variables_initializer())
             self.__warm_start = False
 
@@ -161,19 +145,24 @@ class DANN:
                    batch,
                    is_training,
                    is_source):
-        """ Get tfrecord instance
+        """ Get tfrecord iterator and its initializer
 
-        :param batch: batch size, possibly tensor of integer
-        :param is_training: boolean tensor
-        :param is_source: boolean value
-        :return: iterator, initializer
+         Parameter
+        -----------------------
+        batch: batch size, possibly tensor of integer
+        is_training: boolean tensor
+        is_source: boolean value
+
+         Return
+        -----------------------
+        iterator, initializer
         """
 
         if is_source:
-            tf_reader = self.__recorder_source.read_tf()
+            tf_reader = self.__read_tf_src
             path_to_tfrecord = self.__path_to_tfrecord['source']
         else:
-            tf_reader = self.__recorder_target.read_tf()
+            tf_reader = self.__read_tf_tar
             path_to_tfrecord = self.__path_to_tfrecord['target']
 
         tfrecord_name = tf.where(is_training, path_to_tfrecord['train'], path_to_tfrecord['valid'])
@@ -184,7 +173,6 @@ class DANN:
         # set batch size
         buffer_size = tf.where(is_training, 10000 if is_source else 60000, 1000)
         data_set_api = data_set_api.shuffle(buffer_size=tf.cast(buffer_size, tf.int64))
-        # data_set_api = data_set_api.shuffle(buffer_size=10000)
         data_set_api = data_set_api.batch(tf.cast(batch, tf.int64))
         # make iterator
         iterator = tf.data.Iterator.from_structure(data_set_api.output_types, data_set_api.output_shapes)
@@ -192,7 +180,24 @@ class DANN:
         return iterator, iterator_ini
 
     def __build_graph(self):
-        # initializer
+        """ build tensorflow graph
+
+        G_f : feature extractor
+        G_dc: domain classifier
+        G_m : main task-specific model
+
+        (x_t, y_t) ~ target
+        (x_s, y_s) ~ source
+
+        loss = L_main{ G_m(G_f(x_s)), y_s } - r_dc * L_da{ G_m(G_f(x_s)), G_m(G_f(x_t)) | r_fe }
+
+        * Note: r_dc is regularization term for domain classification, and r_fe is coefficient to scale amount of
+                propagation by feature extractor
+        """
+
+        ##################
+        # initialization #
+        ##################
         if self.__initializer == 'variance_scaling':
             initializer = tf.contrib.layers.variance_scaling_initializer()
         elif self.__initializer == 'truncated_normal':
@@ -201,16 +206,10 @@ class DANN:
             raise ValueError('unknown initializer: %s' % self.__initializer)
 
         self.learning_rate = tf.placeholder_with_default(0.0, [], name='learning_rate')
-
-        # lambda for feature extractor is scheduled depend on epoch.
-        # if self.__domain_adversarial_flg is False, turn off feature extractor as well
-        if self.__domain_adversarial_flg:
-            self.domain_adversarial_feature = tf.placeholder_with_default(0.0, [], name='domain_adversarial_reg_fe')
-            domain_adversarial_feature = self.domain_adversarial_feature
-            domain_adversarial_domain = self.__domain_adversarial_domain
-        else:
-            domain_adversarial_domain = domain_adversarial_feature = 0.0
-
+        self.regularizer_domain_classification = tf.placeholder_with_default(
+            0.0, [], name='regularizer_domain_classification')
+        self.regularizer_feature_extraction = tf.placeholder_with_default(
+            0.0, [], name='regularizer_feature_extraction')
         self.is_training = tf.placeholder_with_default(False, [])
 
         __keep_prob = tf.where(self.is_training, self.__keep_prob, 1.0)
@@ -234,9 +233,13 @@ class DANN:
         # resizing data
         if self.__resize is not None:
             image_tar = tf.image.resize_image_with_crop_or_pad(image_tar, self.__resize, self.__resize)
+            image_src = tf.image.resize_image_with_crop_or_pad(image_src, self.__resize, self.__resize)
+
         # tiling image for channel
-        if self.__tile_channel:
+        if self.__tile_channel == 'tar':
             image_tar = tf.tile(image_tar, [1, 1, 1, 3])
+        elif self.__tile_channel == 'src':
+            image_src = tf.tile(image_src, [1, 1, 1, 3])
 
         # make the channel in between [-1, 1]
         image_src = tf.cast(image_src, tf.float32) / 225 * 2 - 1
@@ -255,26 +258,48 @@ class DANN:
         with tf.variable_scope('model', initializer=initializer):
             pred_prob_src = self.__model(feature_src)
             pred_prob_tar = self.__model(feature_tar, reuse=True)
+            # loss
+            loss_model_src = - tf.reduce_mean(tag_src * tf.log(pred_prob_src + 1e-6))
+            loss_model_tar = - tf.reduce_mean(tag_tar * tf.log(pred_prob_tar + 1e-6))
 
-        # domain adversarial
-        with tf.variable_scope('domain_adversarial', initializer=initializer):
+        # domain classification
+        with tf.variable_scope('domain_classification', initializer=initializer):
             flip_grad = FlipGradientBuilder()
             pred_prob_domain_src = self.__domain_classifier(
-                flip_grad(feature_src, scale=domain_adversarial_feature)
-            )
+                flip_grad(feature_src, scale=self.regularizer_feature_extraction))
             pred_prob_domain_tar = self.__domain_classifier(
-                flip_grad(feature_tar, scale=domain_adversarial_feature),
-                reuse=True
+                flip_grad(feature_tar, scale=self.regularizer_feature_extraction), reuse=True)
+
+            # loss for domain classification and feature extractor: target (1), source (0)
+            loss_domain_classification = - tf.reduce_mean(
+                tf.concat([tf.log(pred_prob_domain_tar + 1e-6), tf.log(1 - pred_prob_domain_src + 1e-6)], axis=0)
             )
 
-        # loss for main model
-        loss_model_src = - tf.reduce_mean(tag_src * tf.log(pred_prob_src + 1e-6))
-        loss_model_tar = - tf.reduce_mean(tag_tar * tf.log(pred_prob_tar + 1e-6))
+        ################
+        # optimization #
+        ################
+        trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
 
-        # loss for domain classification and feature extractor: target (1), source (0)
-        tmp = tf.concat([tf.log(pred_prob_domain_tar + 1e-6), tf.log(1 - pred_prob_domain_src + 1e-6)], axis=0)
-        loss_domain = - tf.reduce_mean(tmp)
-        # loss_feature = tf.reduce_mean(tmp)
+        # optimizer
+        if self.__optimizer == 'sgd':
+            optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
+        elif self.__optimizer == 'adam':
+            optimizer = tf.train.AdamOptimizer(self.learning_rate, beta1=0.5)
+        elif self.__optimizer == 'momentum':
+            optimizer = tf.train.MomentumOptimizer(self.learning_rate, 0.9)
+        else:
+            raise ValueError('unknown optimizer !!')
+
+        # L2 weight decay
+        if __weight_decay != 0.0:
+            l2 = __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in trainable_variables])
+        else:
+            l2 = 0.0
+
+        # optimization
+        total_loss = loss_model_src + self.regularizer_domain_classification * loss_domain_classification + l2
+        gradient = tf.gradients(total_loss, trainable_variables)
+        self.__train_op = optimizer.apply_gradients(zip(gradient, trainable_variables))
 
         # accuracy
         self.__accuracy_src = tf.reduce_mean(
@@ -309,54 +334,6 @@ class DANN:
 
         self.__accuracy_domain = tf.reduce_mean([acc_tar, acc_src])
 
-        ################
-        # optimization #
-        ################
-        # # trainable variable for domain classification
-        # var_domain = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='domain_adversarial')
-        # # trainable variable for feature extractor
-        # var_feature = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='feature_extraction')
-        # # trainable variable for main model
-        # var_model = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='model')
-        # var_model.extend(var_feature)
-
-        # optimizer
-        if self.__optimizer == 'sgd':
-            optimizer = tf.train.GradientDescentOptimizer(self.learning_rate)
-        elif self.__optimizer == 'adam':
-            optimizer = tf.train.AdamOptimizer(self.learning_rate, beta1=0.5)
-        elif self.__optimizer == 'momentum':
-            optimizer = tf.train.MomentumOptimizer(self.learning_rate, 0.9)
-        else:
-            raise ValueError('unknown optimizer !!')
-
-        trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
-
-        if __weight_decay != 0.0:  # L2
-            l2 = __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in trainable_variables])
-            # l2_domain = __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in var_domain])
-            # l2_feature = __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in var_feature])
-            # l2_model = __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in var_model])
-        else:
-            l2 = 0.0
-            # l2_domain = l2_feature = l2_model = 0.0
-
-        gradient = tf.gradients(loss_model_src + domain_adversarial_domain * loss_domain + l2, trainable_variables)
-        self.__train_op = optimizer.apply_gradients(zip(gradient, trainable_variables))
-
-        # gradient_model = tf.gradients(loss_model_src + l2_model, var_model)
-        # gradient_domain = tf.gradients(domain_adversarial_domain * loss_domain + l2_domain, var_domain)
-
-        # if self.__domain_adversarial_flg:
-        #     gradient_feature = tf.gradients(domain_adversarial_feature * loss_feature + l2_feature, var_feature)
-        #     with tf.control_dependencies(gradient_model + gradient_domain + gradient_feature):
-        #         self.__train_op_model = optimizer.apply_gradients(zip(gradient_model, var_model))
-        #         self.__train_op_domain = optimizer.apply_gradients(zip(gradient_domain, var_domain))
-        #         self.__train_op_feature = optimizer.apply_gradients(zip(gradient_feature, var_feature))
-        # else:
-        #     self.__train_op_model = optimizer.apply_gradients(zip(gradient_model, var_model))
-        #     self.__train_op_domain = optimizer.apply_gradients(zip(gradient_domain, var_domain))
-
         # saver
         self.__saver = tf.train.Saver()
 
@@ -375,13 +352,13 @@ class DANN:
 
         self.__summary = tf.summary.merge([
             tf.summary.scalar('meta_learning_rate', self.learning_rate),
-            tf.summary.scalar('meta_domain_adversarial_reg_feature', domain_adversarial_feature),
-            tf.summary.scalar('meta_domain_adversarial_reg_domain', domain_adversarial_domain),
+            tf.summary.scalar('meta_r_domain_classification', self.regularizer_domain_classification),
+            tf.summary.scalar('meta_r_feature_extraction', self.regularizer_feature_extraction),
             tf.summary.scalar('meta_keep_prob', __keep_prob),
             tf.summary.scalar('meta_weight_decay', __weight_decay),
             tf.summary.scalar('loss_model_src', loss_model_src),
             tf.summary.scalar('loss_model_tar', loss_model_tar),
-            tf.summary.scalar('loss_domain', loss_domain),
+            tf.summary.scalar('loss_domain', loss_domain_classification),
             tf.summary.scalar('accuracy_src', self.__accuracy_src),
             tf.summary.scalar('accuracy_tar', self.__accuracy_tar),
             tf.summary.scalar('accuracy_domain', self.__accuracy_domain)
@@ -391,61 +368,36 @@ class DANN:
 
         for var in trainable_variables:
             sh = var.get_shape().as_list()
-            self.__log('%s: %s' % (var.name, str(sh)))
+            self.__logger.info('%s: %s' % (var.name, str(sh)))
+            variable_summaries(var, var.name.split('/')[-1])
             n_var += np.prod(sh)
 
-        # self.__log('variables: feature extractor and model')
-        # for var in var_model:
-        #     sh = var.get_shape().as_list()
-        #     self.__log('%s: %s' % (var.name, str(sh)))
-        #     n_var += np.prod(sh)
-        # self.__log('variables: domain adversarial')
-        # for var in var_domain:
-        #     sh = var.get_shape().as_list()
-        #     self.__log('%s: %s' % (var.name, str(sh)))
-        #     n_var += np.prod(sh)
-
-        self.__log('total variables: %i' % n_var)
-
-    def __log(self, statement):
-        if self.__logger is not None:
-            self.__logger.info(statement)
+        self.__logger.info('total variables: %i' % n_var)
 
     def train(self, epoch: int):
-
-        self.__log('checkpoint (%s), epoch (%i), learning rate (%0.7f)'
-                   % (self.__checkpoint_dir, epoch, self.__ini_learning_rate))
-
         if self.__warm_start:
-            meta = np.load('%s/meta.npz' % self.__checkpoint_dir)
+            dir_to_save = '/'.join(self.__checkpoint.split('/')[:-1])
+            meta = np.load('%s/meta.npz' % dir_to_save)
             i_summary_train = int(meta['i_summary_train'])
             i_summary_valid = int(meta['i_summary_valid'])
             i_summary_valid_tar_train = int(meta['i_summary_valid_tar_train'])
             i_summary_valid_tar_valid = int(meta['i_summary_valid_tar_valid'])
             ini_epoch = int(meta['epoch'])
-            learning_rate = meta['learning_rate']
+            # overwrite initial step by the progress model
+            self.__lr_config['initial_step'] = meta['learning_rate']
         else:
             i_summary_train = 0
             i_summary_valid = 0
             i_summary_valid_tar_train = 0
             i_summary_valid_tar_valid = 0
             ini_epoch = 0
-            if self.__ini_learning_rate is None:
-                raise ValueError('provide learning rate !')
-            learning_rate = self.__ini_learning_rate
 
-        self.__log('checkpoint (%s), epoch (%i)' % (self.__checkpoint_dir, epoch))
+        self.__logger.info('checkpoint (%s), epoch (%i)' % (self.__checkpoint, epoch))
+        scheduler_lr = StepScheduler(current_epoch=ini_epoch, **self.__lr_config)
+        scheduler_r_dc = StepScheduler(current_epoch=ini_epoch, **self.__reg_config_dc)
+        scheduler_r_fe = StepScheduler(current_epoch=ini_epoch, **self.__reg_config_fe)
 
-        scheduler_lr = StepScheduler(
-            initial_step=learning_rate,
-            current_epoch=ini_epoch,
-            **self.__scheduler_lr)
-
-        scheduler_reg = StepScheduler(
-            exponential=True,
-            current_epoch=ini_epoch,
-            **self.__scheduler_reg)
-
+        e = -1
         for e in range(ini_epoch, ini_epoch+epoch):
 
             acc_train, acc_valid, acc_valid_tar_train, acc_valid_tar_valid = [], [], [], []
@@ -456,36 +408,26 @@ class DANN:
             #########
             self.__session.run([self.__iterator_ini_src], feed_dict={self.is_training: True})
             n = 0
-
-            feed_train = {self.learning_rate: scheduler_lr(),
-                          self.is_training: True,
-                          self.domain_adversarial_feature: scheduler_reg()}
+            feed_train = {
+                self.learning_rate: scheduler_lr(),
+                self.is_training: True,
+                self.regularizer_domain_classification: scheduler_r_dc(),
+                self.regularizer_feature_extraction: scheduler_r_fe()
+            }
 
             while True:
                 n += 1
                 self.__session.run([self.__iterator_ini_tar], feed_dict={self.is_training: True})
+
                 try:
-
-                    if self.__domain_adversarial_flg:
-
-                        val = [
-                            self.__accuracy_tar,
-                            self.__accuracy_src,
-                            self.__accuracy_domain,
-                            self.__summary,
-                            self.__train_op
-                        ]
-                        acc_tar, acc_src, acc_d, summary, _ = self.__session.run(val, feed_dict=feed_train)
-                    else:
-
-                        val = [
-                            self.__accuracy_tar,
-                            self.__accuracy_src,
-                            self.__accuracy_domain,
-                            self.__summary,
-                            self.__train_op
-                        ]
-                        acc_tar, acc_src, acc_d, summary, _ = self.__session.run(val, feed_dict=feed_train)
+                    val = [
+                        self.__accuracy_tar,
+                        self.__accuracy_src,
+                        self.__accuracy_domain,
+                        self.__summary,
+                        self.__train_op
+                    ]
+                    acc_tar, acc_src, acc_d, summary, _ = self.__session.run(val, feed_dict=feed_train)
 
                     acc_train.append(acc_src)
                     acc_valid_tar_train.append(acc_tar)
@@ -496,18 +438,14 @@ class DANN:
                     i_summary_train += 1  # time stamp for tf summary
 
                 except tf.errors.OutOfRangeError:
-                    if e == 0:
-                        print('- %i iterations: source train' % n)
                     break
 
-            ########
-            # Test #
-            ########
-
+            ##############
+            # validation #
+            ##############
             # source data: valid
             self.__session.run([self.__iterator_ini_src], feed_dict={self.is_training: False})
             n = 0
-
             while True:
                 n += 1
                 try:
@@ -524,13 +462,12 @@ class DANN:
 
                 except tf.errors.OutOfRangeError:
                     if e == 0:
-                        print('- %i iterations: source valid' % n)
+                        self.__logger.info('- %i iterations: source valid' % n)
                     break
 
             # target data: train
             self.__session.run([self.__iterator_ini_tar], feed_dict={self.is_training: True})
             n = 0
-
             while True:
                 n += 1
                 try:
@@ -547,13 +484,12 @@ class DANN:
 
                 except tf.errors.OutOfRangeError:
                     if e == 0:
-                        print('- %i iterations: target train' % n)
+                        self.__logger.info('- %i iterations: target train' % n)
                     break
 
             # target data: valid
             self.__session.run([self.__iterator_ini_tar], feed_dict={self.is_training: False})
             n = 0
-
             while True:
                 n += 1
                 try:
@@ -576,21 +512,22 @@ class DANN:
             #######
             # log #
             #######
-            self.__log('epoch %i: valid (tar: %0.3f, src: %0.3f) train (tar: %0.3f, src: %0.3f, domain: % 0.3f)'
-                       % (e,
-                          float(np.mean(acc_valid_tar_valid)),
-                          float(np.mean(acc_valid)),
-                          float(np.mean(acc_valid_tar_train)),
-                          float(np.mean(acc_train)),
-                          float(np.mean(acc_domain))
-                          )
-                       )
+            self.__logger.info('epoch %i: valid (tar: %0.3f, src: %0.3f) train (tar: %0.3f, src: %0.3f, domain: % 0.3f)'
+                               % (e,
+                                  float(np.mean(acc_valid_tar_valid)),
+                                  float(np.mean(acc_valid)),
+                                  float(np.mean(acc_valid_tar_train)),
+                                  float(np.mean(acc_train)),
+                                  float(np.mean(acc_domain))
+                                  )
+                               )
 
-        self.__log('FINISH SUCCESSFULLY !!')
+        self.__logger.info('FINISH SUCCESSFULLY :)')
         self.__saver.save(self.__session, self.__checkpoint)
 
-        np.savez('%s/meta.npz' % self.__checkpoint_dir,
-                 learning_rate=learning_rate,
+        dir_to_save = '/'.join(self.__checkpoint.split('/')[:-1])
+        np.savez('%s/meta.npz' % dir_to_save,
+                 learning_rate=scheduler_lr.initial_step,
                  epoch=e+1,
                  i_summary_train=i_summary_train,
                  i_summary_valid=i_summary_valid,

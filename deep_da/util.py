@@ -7,14 +7,24 @@ from glob import glob
 def checkpoint_version(checkpoint_dir: str,
                        config: dict = None,
                        version: int = None):
-    """ Checkpoint versioner:
-    - return checkpoint dir, which has same hyper parameter (config)
-    - return checkpoint dir, which corresponds to the version
-    - return new directory
-    :param config:
-    :param checkpoint_dir: `./checkpoint/lam
-    :param version: number of checkpoint
-    :return:
+    """ Checkpoint versioner: Either of `config` or `version` need to be specified (`config` has priority)
+
+     Parameter
+    ---------------------
+    checkpoint_dir: directory where specific model's checkpoints are (will be) saved, eg) `checkpoint/cnn`
+    config: parameter configuration to find same setting checkpoint
+    version: number of checkpoint to warmstart from
+
+     Return
+    --------------------
+    path_to_checkpoint, config
+
+    - if there are no checkpoints, having same config as provided one, return new version
+        eg) in case there are 'checkpoint/cnn/{v0,v1,v2}`, path_to_checkpoint = 'checkpoint/cnn/v3'
+    - if there is a checkpoint, which has same config as provided one, return that version
+        eg) in case there are 'checkpoint/cnn/{v0,v1,v2}`, and `v2` has same config, path_to_checkpoint = 'checkpoint/cnn/v2'
+    - if `config` is None, `version` is required.
+        eg) in case there are 'checkpoint/cnn/{v0,v1,v2}`, path_to_checkpoint = 'checkpoint/cnn/v0' if `version`=0
     """
 
     if version is not None:
@@ -106,3 +116,25 @@ def create_log(out_file_path: str=None):
             logger.addHandler(handler)
             return logger
 
+
+def raise_error(condition: bool, msg: str):
+    """ function to raise ValueError error
+
+     Parameter
+    -------------
+    condition: if condition is True, raise ValueError
+    msg: manual error message
+    """
+    if condition:
+        raise ValueError(msg)
+
+
+def mkdir(path: str):
+    """ mkdir command
+
+     Parameter
+    -------------
+    path: path to make directory
+    """
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)

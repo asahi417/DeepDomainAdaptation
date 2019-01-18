@@ -1,11 +1,9 @@
 import os
 import numpy as np
 import tensorflow as tf
-from ..util import create_log
-from ..data_processing import TFRecorder
-from . import base_image_fc as image_model_fc
-from . import base_image_cnn as image_model_cnn
-from .step_scheduler import StepScheduler
+from .util_tf import variable_summaries, FlipGradientBuilder, StepScheduler, VALID_BASIC_CELL
+from ..util import create_log, raise_error
+from ..data import TFRecorder
 
 
 class JDOT:
