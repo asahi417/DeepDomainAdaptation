@@ -48,9 +48,8 @@ class DANN:
                  initializer: str='variance_scaling',
                  batch_for_test: int=1000,
                  is_image: bool = True,
-                 base_component: str = 'cnn',
-                 warm_start: bool = True
-                 ):
+                 base_cell: str = 'cnn',
+                 warm_start: bool = True):
 
         self.__is_image = is_image
 
@@ -70,23 +69,23 @@ class DANN:
 
         # basic structure
         if is_image:
-            raise_error(base_component not in VALID_BASIC_CELL['image'].keys(),
-                        'invalid base_component: %s not in %s' % (base_component, VALID_BASIC_CELL['image'].keys()))
-            base_model = VALID_BASIC_CELL['image'][base_component]
+            raise_error(base_cell not in VALID_BASIC_CELL['image'].keys(),
+                        'invalid base_cell: %s not in %s' % (base_cell, VALID_BASIC_CELL['image'].keys()))
+            base_model = VALID_BASIC_CELL['image'][base_cell]
             
             # resize width and height to be fit smaller one (source and target)
-            self.__resize = int(np.min(self.__meta_src.image_shape[0:2] + self.__meta_tar.image_shape[0:2]))
+            self.__resize = int(np.min(self.__meta_src["image_shape"][0:2] + self.__meta_tar["image_shape"][0:2]))
 
             # tile channel to be fit larger one (source and target)
-            raise_error(self.__meta_src.image_shape[-1] not in [1, 3] or self.__meta_tar.image_shape[-1] not in [1, 3],
-                        'invalid shape: tar %s, src %s' % (self.__meta_tar.image_shape, self.__meta_src.image_shape))
-            if self.__meta_tar.image_shape[-1] == self.__meta_src.image_shape[-1]:
+            raise_error(self.__meta_src["image_shape"][-1] not in [1, 3] or self.__meta_tar["image_shape"][-1] not in [1, 3],
+                        'invalid shape: tar %s, src %s' % (self.__meta_tar["image_shape"], self.__meta_src["image_shape"]))
+            if self.__meta_tar["image_shape"][-1] == self.__meta_src["image_shape"][-1]:
                 self.__tile_channel = None
-            elif self.__meta_tar.image_shape[-1] > self.__meta_src.image_shape[-1]:
+            elif self.__meta_tar["image_shape"][-1] > self.__meta_src["image_shape"][-1]:
                 self.__tile_channel = 'src'
             else:
                 self.__tile_channel = 'tar'
-            self.__channel = max(self.__meta_tar.image_shape[-1], self.__meta_src.image_shape[-1]) 
+            self.__channel = max(self.__meta_tar["image_shape"][-1], self.__meta_src["image_shape"][-1]) 
 
             # model configuration
             self.__feature_extractor = base_model.FeatureExtractor([self.__resize, self.__resize, self.__channel],
@@ -122,14 +121,11 @@ class DANN:
 
         self.__session = tf.Session(config=tf.ConfigProto(log_device_placement=False))
 
-        self.__writer_train = \
-            tf.summary.FileWriter('%s/summary_train' % checkpoint_dir, self.__session.graph)
-        self.__writer_valid = \
-            tf.summary.FileWriter('%s/summary_valid' % checkpoint_dir, self.__session.graph)
-        self.__writer_valid_tar_train = \
-            tf.summary.FileWriter('%s/summary_valid_tar_train' % checkpoint_dir, self.__session.graph)
-        self.__writer_valid_tar_valid = \
-            tf.summary.FileWriter('%s/summary_valid_tar_valid' % checkpoint_dir, self.__session.graph)
+        # self.__writer_train = \
+        #     tf.summary.FileWriter('%s/summary_train' % checkpoint_dir, self.__session.graph)
+        # self.__writer_valid = \
+        #     tf.summary.FileWriter('%s/summary_valid' % checkpoint_dir, self.__session.graph)
+        self.__writer = tf.summary.FileWriter('%s/summary' % checkpoint_dir, self.__session.graph)
 
         # load model
         if os.path.exists('%s.meta' % self.__checkpoint) and warm_start:
@@ -171,7 +167,8 @@ class DANN:
         # convert record to tensor
         data_set_api = data_set_api.map(tf_reader, self.__n_thread)
         # set batch size
-        buffer_size = tf.where(is_training, 10000 if is_source else 60000, 1000)
+        # buffer_size = tf.where(is_training, 10000 if is_source else 60000, 1000)
+        buffer_size = 5000
         data_set_api = data_set_api.shuffle(buffer_size=tf.cast(buffer_size, tf.int64))
         data_set_api = data_set_api.batch(tf.cast(batch, tf.int64))
         # make iterator
@@ -340,38 +337,39 @@ class DANN:
         ##################
         # scalar summary #
         ##################
-        self.__summary_src = tf.summary.merge([
-            tf.summary.scalar('loss_model_src', loss_model_src),
-            tf.summary.scalar('accuracy_src', self.__accuracy_src)
-        ])
-
-        self.__summary_tar = tf.summary.merge([
-            tf.summary.scalar('loss_model_tar', loss_model_tar),
-            tf.summary.scalar('accuracy_tar', self.__accuracy_tar)
-        ])
-
-        self.__summary = tf.summary.merge([
+        self.__summary_train = tf.summary.merge([
             tf.summary.scalar('meta_learning_rate', self.learning_rate),
             tf.summary.scalar('meta_r_domain_classification', self.regularizer_domain_classification),
             tf.summary.scalar('meta_r_feature_extraction', self.regularizer_feature_extraction),
             tf.summary.scalar('meta_keep_prob', __keep_prob),
             tf.summary.scalar('meta_weight_decay', __weight_decay),
-            tf.summary.scalar('loss_model_src', loss_model_src),
-            tf.summary.scalar('loss_model_tar', loss_model_tar),
-            tf.summary.scalar('loss_domain', loss_domain_classification),
-            tf.summary.scalar('accuracy_src', self.__accuracy_src),
-            tf.summary.scalar('accuracy_tar', self.__accuracy_tar),
-            tf.summary.scalar('accuracy_domain', self.__accuracy_domain)
+            tf.summary.scalar('eval_train_loss_model_src', loss_model_src),
+            tf.summary.scalar('eval_train_loss_model_tar', loss_model_tar),
+            tf.summary.scalar('eval_train_loss_domain', loss_domain_classification),
+            tf.summary.scalar('eval_train_accuracy_src', self.__accuracy_src),
+            tf.summary.scalar('eval_train_accuracy_tar', self.__accuracy_tar),
+            tf.summary.scalar('eval_train_accuracy_domain', self.__accuracy_domain)
+        ])
+
+        self.__summary_valid = tf.summary.merge([
+            tf.summary.scalar('eval_valid_loss_model_src', loss_model_src),
+            tf.summary.scalar('eval_valid_loss_model_tar', loss_model_tar),
+            tf.summary.scalar('eval_valid_loss_domain', loss_domain_classification),
+            tf.summary.scalar('eval_valid_accuracy_src', self.__accuracy_src),
+            tf.summary.scalar('eval_valid_accuracy_tar', self.__accuracy_tar),
+            tf.summary.scalar('eval_valid_accuracy_domain', self.__accuracy_domain)
         ])
 
         n_var = 0
 
+        var_stat = []
         for var in trainable_variables:
             sh = var.get_shape().as_list()
             self.__logger.info('%s: %s' % (var.name, str(sh)))
-            variable_summaries(var, var.name.split('/')[-1])
+            var_stat.extend(variable_summaries(var, var.name.split(':')[0]))
             n_var += np.prod(sh)
 
+        self.__summary_train_var = tf.summary.merge(var_stat)
         self.__logger.info('total variables: %i' % n_var)
 
     def train(self, epoch: int):
@@ -380,160 +378,62 @@ class DANN:
             meta = np.load('%s/meta.npz' % dir_to_save)
             i_summary_train = int(meta['i_summary_train'])
             i_summary_valid = int(meta['i_summary_valid'])
-            i_summary_valid_tar_train = int(meta['i_summary_valid_tar_train'])
-            i_summary_valid_tar_valid = int(meta['i_summary_valid_tar_valid'])
+            i_summary_train_var = int(meta['i_summary_train_var'])
             ini_epoch = int(meta['epoch'])
-            # overwrite initial step by the progress model
-            self.__lr_config['initial_step'] = meta['learning_rate']
         else:
-            i_summary_train = 0
-            i_summary_valid = 0
-            i_summary_valid_tar_train = 0
-            i_summary_valid_tar_valid = 0
-            ini_epoch = 0
+            ini_epoch, i_summary_train, i_summary_valid, i_summary_train_var = 0, 0, 0, 0
 
         self.__logger.info('checkpoint (%s), epoch (%i)' % (self.__checkpoint, epoch))
         scheduler_lr = StepScheduler(current_epoch=ini_epoch, **self.__lr_config)
         scheduler_r_dc = StepScheduler(current_epoch=ini_epoch, **self.__reg_config_dc)
         scheduler_r_fe = StepScheduler(current_epoch=ini_epoch, **self.__reg_config_fe)
-
         e = -1
+
         for e in range(ini_epoch, ini_epoch+epoch):
 
-            acc_train, acc_valid, acc_valid_tar_train, acc_valid_tar_valid = [], [], [], []
-            acc_domain = []
+            self.__logger.info('epoch %i/%i' % (e, ini_epoch+epoch))
 
-            #########
-            # Train #
-            #########
-            self.__session.run([self.__iterator_ini_src], feed_dict={self.is_training: True})
-            n = 0
+            # Train
+            self.__session.run([self.__iterator_ini_src, self.__iterator_ini_tar], feed_dict={self.is_training: True})
             feed_train = {
-                self.learning_rate: scheduler_lr(),
                 self.is_training: True,
+                self.learning_rate: scheduler_lr(),
                 self.regularizer_domain_classification: scheduler_r_dc(),
                 self.regularizer_feature_extraction: scheduler_r_fe()
             }
 
             while True:
-                n += 1
-                self.__session.run([self.__iterator_ini_tar], feed_dict={self.is_training: True})
-
                 try:
-                    val = [
-                        self.__accuracy_tar,
-                        self.__accuracy_src,
-                        self.__accuracy_domain,
-                        self.__summary,
-                        self.__train_op
-                    ]
-                    acc_tar, acc_src, acc_d, summary, _ = self.__session.run(val, feed_dict=feed_train)
-
-                    acc_train.append(acc_src)
-                    acc_valid_tar_train.append(acc_tar)
-                    acc_domain.append(acc_d)
-
-                    # write tensorboard writer
-                    self.__writer_train.add_summary(summary, i_summary_train)
+                    summary_train, _ = self.__session.run([self.__summary_train, self.__train_op], feed_dict=feed_train)
+                    self.__writer.add_summary(summary_train, i_summary_train)  # write tensorboard writer
                     i_summary_train += 1  # time stamp for tf summary
-
                 except tf.errors.OutOfRangeError:
                     break
 
-            ##############
-            # validation #
-            ##############
-            # source data: valid
-            self.__session.run([self.__iterator_ini_src], feed_dict={self.is_training: False})
-            n = 0
+            # validation
+            self.__session.run([self.__iterator_ini_src, self.__iterator_ini_tar], feed_dict={self.is_training: False})
             while True:
-                n += 1
                 try:
-                    val = [
-                        self.__accuracy_src,
-                        self.__summary_src
-                    ]
-                    acc, summary = self.__session.run(val, feed_dict={self.is_training: False})
-                    acc_valid.append(acc)
-
-                    # write tensorboard writer
-                    self.__writer_valid.add_summary(summary, i_summary_valid)
+                    summary_valid = self.__session.run(self.__summary_valid, feed_dict={self.is_training: False})
+                    self.__writer.add_summary(summary_valid, i_summary_valid)  # write tensorboard writer
                     i_summary_valid += 1  # time stamp for tf summary
-
                 except tf.errors.OutOfRangeError:
-                    if e == 0:
-                        self.__logger.info('- %i iterations: source valid' % n)
                     break
 
-            # target data: train
-            self.__session.run([self.__iterator_ini_tar], feed_dict={self.is_training: True})
-            n = 0
-            while True:
-                n += 1
-                try:
-                    val = [
-                        self.__accuracy_tar,
-                        self.__summary_tar
-                    ]
-                    acc, summary = self.__session.run(val, feed_dict={self.is_training: True})
-                    acc_valid_tar_train.append(acc)
-
-                    # write tensorboard writer
-                    self.__writer_valid_tar_train.add_summary(summary, i_summary_valid_tar_train)
-                    i_summary_valid_tar_train += 1  # time stamp for tf summary
-
-                except tf.errors.OutOfRangeError:
-                    if e == 0:
-                        self.__logger.info('- %i iterations: target train' % n)
-                    break
-
-            # target data: valid
-            self.__session.run([self.__iterator_ini_tar], feed_dict={self.is_training: False})
-            n = 0
-            while True:
-                n += 1
-                try:
-                    val = [
-                        self.__accuracy_tar,
-                        self.__summary_tar
-                    ]
-                    acc, summary = self.__session.run(val, feed_dict={self.is_training: False})
-                    acc_valid_tar_valid.append(acc)
-
-                    # write tensorboard writer
-                    self.__writer_valid_tar_valid.add_summary(summary, i_summary_valid_tar_valid)
-                    i_summary_valid_tar_valid += 1  # time stamp for tf summary
-
-                except tf.errors.OutOfRangeError:
-                    if e == 0:
-                        print('- %i iterations: target valid' % n)
-                    break
-
-            #######
-            # log #
-            #######
-            self.__logger.info('epoch %i: valid (tar: %0.3f, src: %0.3f) train (tar: %0.3f, src: %0.3f, domain: % 0.3f)'
-                               % (e,
-                                  float(np.mean(acc_valid_tar_valid)),
-                                  float(np.mean(acc_valid)),
-                                  float(np.mean(acc_valid_tar_train)),
-                                  float(np.mean(acc_train)),
-                                  float(np.mean(acc_domain))
-                                  )
-                               )
+            if e % 25 == 0:  # every 25 epoch, save statistics of weights
+                summary_train_var = self.__session.run(self.__summary_train_var, feed_dict={self.is_training: False})
+                self.__writer.add_summary(summary_train_var, i_summary_train_var)  # write tensorboard writer
+                i_summary_train_var += 1  # time stamp for tf summary
 
         self.__logger.info('FINISH SUCCESSFULLY :)')
         self.__saver.save(self.__session, self.__checkpoint)
 
         dir_to_save = '/'.join(self.__checkpoint.split('/')[:-1])
         np.savez('%s/meta.npz' % dir_to_save,
-                 learning_rate=scheduler_lr.initial_step,
                  epoch=e+1,
                  i_summary_train=i_summary_train,
-                 i_summary_valid=i_summary_valid,
-                 i_summary_valid_tar_train=i_summary_valid_tar_train,
-                 i_summary_valid_tar_valid=i_summary_valid_tar_valid
-                 )
+                 i_summary_train_var=i_summary_train_var,
+                 i_summary_valid=i_summary_valid)
 
 
 

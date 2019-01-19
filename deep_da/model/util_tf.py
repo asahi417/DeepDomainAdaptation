@@ -80,11 +80,11 @@ def variable_summaries(var, name):
         with tf.name_scope('stddev'):
             stddev = tf.sqrt(tf.reduce_mean(tf.square(var - mean)))
 
-    return [tf.summary.scalar('mean', mean),
-            tf.summary.scalar('stddev', stddev),
-            tf.summary.scalar('max', tf.reduce_max(var)),
-            tf.summary.scalar('min', tf.reduce_min(var)),
-            tf.summary.histogram('histogram', var)]
+        return [tf.summary.scalar('mean', mean),
+                tf.summary.scalar('stddev', stddev),
+                tf.summary.scalar('max', tf.reduce_max(var)),
+                tf.summary.scalar('min', tf.reduce_min(var)),
+                tf.summary.histogram('histogram', var)]
 
 
 def full_connected(x,
