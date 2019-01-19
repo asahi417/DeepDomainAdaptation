@@ -1,7 +1,9 @@
-"""
-about batching --> https://stackoverflow.com/questions/44331612/how-to-set-a-number-for-epoch-in-tf-python-io-tf-record-iterator
-about buffer size of shuffle --> https://github.com/tensorflow/tensorflow/issues/14857
-pixel of each image is in range of [0 225]
+""" Script to check image from produced tfrecord file by `bin/script_tfrecord.py`
+
+Reference
+- about batching --> https://stackoverflow.com/questions/44331612/how-to-set-a-number-for-epoch-in-tf-python-io-tf-record-iterator
+- about buffer size of shuffle --> https://github.com/tensorflow/tensorflow/issues/14857
+- pixel of each image is in range of [0 225]
 """
 
 import os
@@ -23,7 +25,7 @@ if not os.path.exists(OUTPUT):
 
 def get_options(parser):
     share_param = {'nargs': '?', 'action': 'store', 'const': None, 'choices': None, 'metavar': None}
-    parser.add_argument('-n', '--num', help='number to show', default=10, type=int, **share_param)
+    parser.add_argument('-n', '--num', help='number to show', default=5, type=int, **share_param)
     parser.add_argument('--data', help='dataset name in %s' % CONFIG['RAW_DATA'].keys(), required=True, type=str,
                         **share_param)
     return parser.parse_args()
@@ -36,8 +38,8 @@ class TestTFRecord:
                  n_thread=1):
 
         self.__n_thread = n_thread
-        self.__read_tf, self.__meta = deep_da.TFRecorder().read_tf('%s/%s' % (CONFIG["TFRECORD_DIR"], args.data),
-                                                                   is_image=True)
+        self.__path_tfrecord = path
+        self.__read_tf, self.__meta = deep_da.TFRecorder().read_tf(self.__path_tfrecord, is_image=True)
         self.__build_graph()
         self.session = tf.Session(config=tf.ConfigProto(log_device_placement=False))
         self.session.run(tf.global_variables_initializer())
@@ -53,7 +55,7 @@ class TestTFRecord:
         self.tfrecord_name = tf.placeholder(tf.string, name='tfrecord_dataset_name')
         data_set_api = tf.data.TFRecordDataset(self.tfrecord_name, compression_type='GZIP')
         # convert record to tensor
-        data_set_api = data_set_api.map(self.__recorder.read_tf(), self.__n_thread)
+        data_set_api = data_set_api.map(self.__read_tf, self.__n_thread)
         # set batch size
         data_set_api = data_set_api.shuffle(buffer_size=10000, seed=0)
         data_set_api = data_set_api.batch(1)
@@ -68,7 +70,7 @@ class TestTFRecord:
     def get_data(self):
         img, tag = recorder.session.run([recorder.input_image, recorder.tag])
         img, tag = img[0], tag[0]
-        tag = self.__recorder.lookup_label_inv[int(np.argmax(tag))]
+        tag = self.__meta['lookup_label_inv'][int(np.argmax(tag))]
         return img, int(tag)
 
 
@@ -76,9 +78,9 @@ if __name__ == '__main__':
     args = get_options(
         argparse.ArgumentParser(description='This script is ...', formatter_class=argparse.RawTextHelpFormatter))
 
-    tfrecord_path = '%s/%s' % (config['TFRECORD_DIR'], args.data)
+    tfrecord_path = '%s/%s' % (CONFIG["TFRECORD_DIR"], args.data)
 
-    recorder = TestTFRecord(tfrecord_path, args.data)
+    recorder = TestTFRecord(tfrecord_path)
 
     for e in range(args.num):
         x, y = recorder.get_data()
