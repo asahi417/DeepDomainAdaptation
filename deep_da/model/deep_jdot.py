@@ -27,88 +27,57 @@ class DeepJDOT:
     """
 
     def __init__(self,
-                 model_name: str,
-                 distance_coefficient_embedding: float,
-                 distance_coefficient_output: float,
                  checkpoint_dir: str,
+                 regularizer_config_domain_classification: dict,
+                 regularizer_config_feature_extraction: dict,
+                 learning_rate_config: dict,
                  path_to_tfrecord_source: str,
                  path_to_tfrecord_target: str,
-                 config_feature_extractor: dict=None,
-                 config_domain_classifier: dict=None,
-                 config_model: dict=None,
-                 learning_rate: float = None,
+                 config_feature_extractor: dict = None,
+                 config_domain_classifier: dict = None,
+                 config_model: dict = None,
                  batch: int = 10,
                  optimizer: str = 'sgd',
                  weight_decay: float = 0.0,
                  keep_prob: float = 1.0,
-                 debug: bool = True,
                  n_thread: int = 4,
                  ckpt_epoch: int = None,
-                 initializer: str='variance_scaling',
-                 batch_for_test: int=1000,
-                 config_scheduler_learning_rate: dict=None):
+                 initializer: str = 'variance_scaling',
+                 batch_for_test: int = 1000,
+                 is_image: bool = True,
+                 base_cell: str = 'cnn',
+                 warm_start: bool = True):
+        """ DANN (Domain Adversarial Neural Network) model
 
-        self.__distance_coefficient_embedding = distance_coefficient_embedding
-        self.__distance_coefficient_output = distance_coefficient_output
+         Parameter
+        -------------------
+        checkpoint_dir: path to checkpoint directory
+        regularizer_config_domain_classification: dictionary of scheduling configuration for domain classification regularizer
+        regularizer_config_feature_extraction: dictionary of scheduling configuration for feature extraction regularizer
+        learning_rate_config: dictionary of scheduling configuration for learning rate
+        path_to_tfrecord_source: path to tfrecord file (source data)
+        path_to_tfrecord_target: path to tfrecord file (target data)
+        config_feature_extractor: dictionary of configuration for feature extractor
+        config_domain_classifier: dictionary of configuration for domain classifier
+        config_model: dictionary of configuration for model
+        batch: batch size
+        optimizer: optimizer ['adam', 'momentum', 'sgd']
+        weight_decay: weight decay
+        keep_prob: dropout keep probability
+        n_thread: number of thread for tfrecord
+        ckpt_epoch: checkpoint epoch for warm start
+        initializer: initializer ['variance_scaling', 'truncated_normal']
+        batch_for_test: batch size for validation or test
+        is_image: if the data is image
+        base_cell: base cell from ['cnn', 'fc']
+        warm_start: if warm start
+        """
 
-        self.__checkpoint_dir = checkpoint_dir
-        if ckpt_epoch is None:
-            self.__checkpoint = '%s/model.ckpt' % checkpoint_dir
-        else:
-            self.__checkpoint = '%s/model-%i.ckpt' % (checkpoint_dir, ckpt_epoch)
+        self.__is_image = is_image
 
-        # hyper parameters
-        self.__ini_learning_rate = learning_rate
-
-        self.__batch = batch
-        self.__optimizer = optimizer
-        self.__weight_decay = weight_decay
-        self.__keep_prob = keep_prob
-        self.__logger = create_log('%s/log' % self.__checkpoint_dir) if debug else None
-
-        self.__is_image = 'image' in model_name
         # tfrecorder
-        self.__recorder_source = TFRecorder(path_to_tfrecord_source, debug=False, is_image=self.__is_image)
-        self.__recorder_source.load_statistics()
-        self.__recorder_target = TFRecorder(path_to_tfrecord_target, debug=False, is_image=self.__is_image)
-        self.__recorder_target.load_statistics()
-
-        if self.__is_image:
-            # resize (data from source and target should have same sized image)
-            if self.__recorder_target.image_shape[0] == self.__recorder_source.image_shape[0]:
-                self.__resize = self.__recorder_target.image_shape[0]
-            elif self.__recorder_target.image_shape[0] < self.__recorder_source.image_shape[0]:
-                self.__resize = self.__recorder_source.image_shape[0]
-            else:
-                raise ValueError('source data should be larger than target.')
-
-            # tile channel (data from source and target should have same channeled image)
-            if self.__recorder_target.image_shape[2] == self.__recorder_source.image_shape[2]:
-                self.__tile_channel = False
-            elif self.__recorder_target.image_shape[2] == 1 and self.__recorder_source.image_shape[2] == 3:
-                self.__tile_channel = True
-            else:
-                raise ValueError('Channel size is wired: channel of source image >= channel'
-                                 'of target image and both should be 1 or 3.')
-
-            # get models
-            if model_name == 'image-cnn':
-                image_model = image_model_cnn
-            elif model_name == 'image-fc':
-                image_model = image_model_fc
-            else:
-                raise ValueError('unknown model')
-
-            self.__feature_extractor = image_model.FeatureExtractor(
-                [self.__resize, self.__resize, self.__recorder_source.image_shape[2]],
-                **config_feature_extractor
-            )
-            self.__domain_classifier = image_model.DomainClassifier(**config_domain_classifier)
-            self.__model = image_model.Model(**config_model)
-
-        else:
-            raise ValueError('unknown mode')
-
+        self.__read_tf_src, self.__meta_src = TFR.read_tf(dir_to_tfrecord=path_to_tfrecord_source, is_image=is_image)
+        self.__read_tf_tar, self.__meta_tar = TFR.read_tf(dir_to_tfrecord=path_to_tfrecord_target, is_image=is_image)
         self.__path_to_tfrecord = dict(
             source=dict(
                 train='%s/train.tfrecord' % path_to_tfrecord_source,
@@ -120,56 +89,95 @@ class DeepJDOT:
             )
         )
 
+        # basic structure
+        if is_image:
+            raise_error(base_cell not in VALID_BASIC_CELL['image'].keys(),
+                        'invalid base_cell: %s not in %s' % (base_cell, VALID_BASIC_CELL['image'].keys()))
+            base_model = VALID_BASIC_CELL['image'][base_cell]
+
+            # resize width and height to be fit smaller one (source and target)
+            self.__resize = int(np.min(self.__meta_src["image_shape"][0:2] + self.__meta_tar["image_shape"][0:2]))
+
+            # tile channel to be fit larger one (source and target)
+            raise_error(
+                self.__meta_src["image_shape"][-1] not in [1, 3] or self.__meta_tar["image_shape"][-1] not in [1, 3],
+                'invalid shape: tar %s, src %s' % (self.__meta_tar["image_shape"], self.__meta_src["image_shape"]))
+            if self.__meta_tar["image_shape"][-1] == self.__meta_src["image_shape"][-1]:
+                self.__tile_channel = None
+            elif self.__meta_tar["image_shape"][-1] > self.__meta_src["image_shape"][-1]:
+                self.__tile_channel = 'src'
+            else:
+                self.__tile_channel = 'tar'
+            self.__channel = max(self.__meta_tar["image_shape"][-1], self.__meta_src["image_shape"][-1])
+
+            # model configuration
+            self.__feature_extractor = base_model.FeatureExtractor([self.__resize, self.__resize, self.__channel],
+                                                                   **config_feature_extractor)
+            self.__domain_classifier = base_model.DomainClassifier(**config_domain_classifier)
+            self.__model = base_model.Model(**config_model)
+        else:
+            raise ValueError('TBA')
+
+        # checkpoint
+        if ckpt_epoch is None:
+            self.__checkpoint = '%s/model.ckpt' % checkpoint_dir
+        else:
+            self.__checkpoint = '%s/model-%i.ckpt' % (checkpoint_dir, ckpt_epoch)
+
+        # training parameters
+        self.__batch = batch
+        self.__optimizer = optimizer
+        self.__weight_decay = weight_decay
+        self.__keep_prob = keep_prob
         self.__n_thread = n_thread
         self.__initializer = initializer
         self.__batch_for_test = batch_for_test
-        self.__scheduler_lr = config_scheduler_learning_rate
 
-        self.__log('BUILD JDOT GRAPH')
+        self.__lr_config = learning_rate_config
+        self.__reg_config_dc = regularizer_config_domain_classification
+        self.__reg_config_fe = regularizer_config_feature_extraction
+
+        self.__logger = create_log('%s/log' % checkpoint_dir)
+
+        self.__logger.info('BUILD DANN GRAPH')
         self.__build_graph()
 
         self.__session = tf.Session(config=tf.ConfigProto(log_device_placement=False))
 
-        self.__writer_train = \
-            tf.summary.FileWriter('%s/summary_train' % self.__checkpoint_dir, self.__session.graph)
-        self.__writer_valid = \
-            tf.summary.FileWriter('%s/summary_valid' % self.__checkpoint_dir, self.__session.graph)
-        self.__writer_valid_tar_train = \
-            tf.summary.FileWriter('%s/summary_valid_tar_train' % self.__checkpoint_dir, self.__session.graph)
-        self.__writer_valid_tar_valid = \
-            tf.summary.FileWriter('%s/summary_valid_tar_valid' % self.__checkpoint_dir, self.__session.graph)
+        self.__writer = tf.summary.FileWriter('%s/summary' % checkpoint_dir, self.__session.graph)
 
-        # self.__writer_train = tf.summary.FileWriter('%s/summary_train' % self.__checkpoint_dir, self.__session.graph)
-        # self.__writer_valid = tf.summary.FileWriter('%s/summary_valid' % self.__checkpoint_dir, self.__session.graph)
-
-        # Load model
-        if os.path.exists('%s.meta' % self.__checkpoint):
-            self.__log('load variable from %s' % self.__checkpoint)
+        # load model
+        if os.path.exists('%s.meta' % self.__checkpoint) and warm_start:
+            self.__logger.info('load variable from %s' % self.__checkpoint)
             self.__saver.restore(self.__session, self.__checkpoint)
             self.__warm_start = True
         else:
-            os.makedirs(self.__checkpoint_dir, exist_ok=True)
+            os.makedirs(checkpoint_dir, exist_ok=True)
             self.__session.run(tf.global_variables_initializer())
             self.__warm_start = False
 
     def __tfrecord(self,
                    batch,
                    is_training,
-                   is_source,
-                   seed=None):
-        """ Get tfrecord instance
+                   is_source):
+        """ Get tfrecord iterator and its initializer
 
-        :param batch: batch size, possibly tensor of integer
-        :param is_training: boolean tensor
-        :param is_source: boolean value
-        :return: iterator, initializer
+         Parameter
+        -----------------------
+        batch: batch size, possibly tensor of integer
+        is_training: boolean tensor
+        is_source: boolean value
+
+         Return
+        -----------------------
+        iterator, initializer
         """
 
         if is_source:
-            tf_reader = self.__recorder_source.read_tf()
+            tf_reader = self.__read_tf_src
             path_to_tfrecord = self.__path_to_tfrecord['source']
         else:
-            tf_reader = self.__recorder_target.read_tf()
+            tf_reader = self.__read_tf_tar
             path_to_tfrecord = self.__path_to_tfrecord['target']
 
         tfrecord_name = tf.where(is_training, path_to_tfrecord['train'], path_to_tfrecord['valid'])
@@ -178,15 +186,9 @@ class DeepJDOT:
         # convert record to tensor
         data_set_api = data_set_api.map(tf_reader, self.__n_thread)
         # set batch size
-
-        buffer_size = tf.where(is_training, 10000 if is_source else 60000, 1000)
-        if seed is None:
-            data_set_api = data_set_api.shuffle(buffer_size=tf.cast(buffer_size, tf.int64))
-        else:
-            data_set_api = data_set_api.shuffle(buffer_size=tf.cast(buffer_size, tf.int64),
-                                                seed=tf.cast(seed, tf.int64))
-
-        # data_set_api = data_set_api.shuffle(buffer_size=10000)
+        # buffer_size = tf.where(is_training, 10000 if is_source else 60000, 1000)
+        buffer_size = 5000
+        data_set_api = data_set_api.shuffle(buffer_size=tf.cast(buffer_size, tf.int64))
         data_set_api = data_set_api.batch(tf.cast(batch, tf.int64))
         # make iterator
         iterator = tf.data.Iterator.from_structure(data_set_api.output_types, data_set_api.output_shapes)

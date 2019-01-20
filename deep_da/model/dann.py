@@ -23,7 +23,7 @@ class DANN:
      Usage
     -----------
     >>> import deep_da
-    >>> model_instance = deep_da.model.DANN()
+    >>> model_instance = deep_da.model.DANN(**parameter)
     >>> # train model
     >>> model_instance.train(epoch=10)
 
@@ -50,6 +50,31 @@ class DANN:
                  is_image: bool = True,
                  base_cell: str = 'cnn',
                  warm_start: bool = True):
+        """ DANN (Domain Adversarial Neural Network) model
+
+         Parameter
+        -------------------
+        checkpoint_dir: path to checkpoint directory
+        regularizer_config_domain_classification: dictionary of scheduling configuration for domain classification regularizer
+        regularizer_config_feature_extraction: dictionary of scheduling configuration for feature extraction regularizer
+        learning_rate_config: dictionary of scheduling configuration for learning rate
+        path_to_tfrecord_source: path to tfrecord file (source data)
+        path_to_tfrecord_target: path to tfrecord file (target data)
+        config_feature_extractor: dictionary of configuration for feature extractor
+        config_domain_classifier: dictionary of configuration for domain classifier
+        config_model: dictionary of configuration for model
+        batch: batch size
+        optimizer: optimizer ['adam', 'momentum', 'sgd']
+        weight_decay: weight decay
+        keep_prob: dropout keep probability
+        n_thread: number of thread for tfrecord
+        ckpt_epoch: checkpoint epoch for warm start
+        initializer: initializer ['variance_scaling', 'truncated_normal']
+        batch_for_test: batch size for validation or test
+        is_image: if the data is image
+        base_cell: base cell from ['cnn', 'fc']
+        warm_start: if warm start
+        """
 
         self.__is_image = is_image
 
@@ -121,10 +146,6 @@ class DANN:
 
         self.__session = tf.Session(config=tf.ConfigProto(log_device_placement=False))
 
-        # self.__writer_train = \
-        #     tf.summary.FileWriter('%s/summary_train' % checkpoint_dir, self.__session.graph)
-        # self.__writer_valid = \
-        #     tf.summary.FileWriter('%s/summary_valid' % checkpoint_dir, self.__session.graph)
         self.__writer = tf.summary.FileWriter('%s/summary' % checkpoint_dir, self.__session.graph)
 
         # load model
@@ -420,7 +441,7 @@ class DANN:
                 except tf.errors.OutOfRangeError:
                     break
 
-            if e % 25 == 0:  # every 25 epoch, save statistics of weights
+            if e % 20 == 0:  # every 20 epoch, save statistics of weights
                 summary_train_var = self.__session.run(self.__summary_train_var, feed_dict={self.is_training: False})
                 self.__writer.add_summary(summary_train_var, i_summary_train_var)  # write tensorboard writer
                 i_summary_train_var += 1  # time stamp for tf summary

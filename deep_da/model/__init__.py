@@ -1,2 +1,2 @@
 from .dann import DANN
-from .jdot import JDOT
+from .deep_jdot import DeepJDOT
