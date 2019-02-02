@@ -46,4 +46,4 @@ if __name__ == '__main__':
 
     model_instance = MODEL_LIST[args.model]
     model = model_instance(root_dir=ROOT_DIR, model_checkpoint_version=args.version)
-    model_instance.train(epoch=args.epoch)
+    model.train(epoch=args.epoch)
