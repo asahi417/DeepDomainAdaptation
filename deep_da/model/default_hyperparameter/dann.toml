@@ -1,0 +1,32 @@
+# hyperparameter: dann-cnn, svhn -> mnist
+
+batch=500
+optimizer='adam'
+weight_decay=1e-8
+is_image=true
+base_cell='cnn'
+#keep_prob=0.8
+
+[learning_rate_config]
+identity=true
+initial_step=0.0002
+
+[regularizer_config_domain_classification]
+identity=true
+initial_step=1.0
+
+[regularizer_config_feature_extraction]
+exponential=true
+multiplier=0.0004
+
+[config_feature_extractor]
+cnn_channel=[32, 32, 64, 64, 128, 128]
+cnn_filter=[3, 3, 3, 3, 3, 3]
+cnn_stride=[2, 2, 2, 2, 2, 2]
+fc_n_hidden=128
+
+[config_domain_classifier]
+output_size=1
+
+[config_model]
+output_size=10

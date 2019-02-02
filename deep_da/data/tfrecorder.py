@@ -12,8 +12,8 @@ from ..util import create_log, raise_error, mkdir
 
 
 VALID_DATA = dict(
-    mnist=dict(iterator=iterator.MNIST, is_image=True),
-    svhn=dict(iterator=iterator.SVHN, is_image=True)
+    mnist=iterator.MNIST,
+    svhn=iterator.SVHN
 )
 
 
@@ -55,7 +55,7 @@ class TFRecorder:
         mkdir(dir_to_save)
         raise_error(dataset_name not in VALID_DATA.keys(),
                     'unknown data %s not in %s' % (dataset_name, str(VALID_DATA.keys())))
-        data_iterator_class = VALID_DATA[dataset_name]['iterator']
+        data_iterator_class = VALID_DATA[dataset_name]
         data_iterator = data_iterator_class(path_to_data=path_to_data)
 
         self.__logger.info('START CREATE TFRECORD:\n data: %s \n path: %s \n saved at: %s'
@@ -73,12 +73,7 @@ class TFRecorder:
                 self.__logger.info(' - process %s (total size: %i)' % (data_type, data_iterator.data_size))
 
                 for n, data in enumerate(data_iterator):
-
-                    if VALID_DATA[dataset_name]['is_image']:
-                        feature = dict(image=byte_feature(data['image']), label=byte_feature(data['label']))
-                    else:
-                        raise ValueError('TODO !!!!')
-
+                    feature = dict(data=byte_feature(data['data']), label=byte_feature(data['label']))
                     ex = tf.train.Example(features=tf.train.Features(feature=feature))
                     writer.write(ex.SerializeToString())
 
@@ -94,14 +89,12 @@ class TFRecorder:
         self.__logger.info('Completed :)')
 
     @staticmethod
-    def read_tf(dir_to_tfrecord: str,
-                is_image: bool):
+    def read_tf(dir_to_tfrecord: str):
         """ Get instance to be used in tensorflow graph
 
          Parameter
         ---------------------
         dir_to_tfrecord: path to directory where tfrecord files are saved (same as `dir_to_save` when create files)
-        is_image: if the data linked to `dir_to_tfrecord` is image or not
         """
 
         meta_dict = json.load(open('%s/meta.json' % dir_to_tfrecord))
@@ -109,23 +102,20 @@ class TFRecorder:
         lookup_label = json.load(open('%s/lookup_label.json' % dir_to_tfrecord))
         lookup_label_inv = dict((i, k) for k, i in lookup_label.items())
 
-        if is_image:
-            def __read_tf(example_proto):
-                features = dict(
-                    image=tf.FixedLenFeature((), tf.string, default_value=""),
-                    label=tf.FixedLenFeature((), tf.string, default_value=""),
-                )
-                parsed_features = tf.parse_single_example(example_proto, features)
+        def __read_tf(example_proto):
+            features = dict(
+                data=tf.FixedLenFeature((), tf.string, default_value=""),
+                label=tf.FixedLenFeature((), tf.string, default_value=""),
+            )
+            parsed_features = tf.parse_single_example(example_proto, features)
 
-                feature_image = tf.decode_raw(parsed_features["image"], tf.int32)
-                feature_image = tf.reshape(feature_image, meta_dict['image_shape'])
+            feature_data = tf.decode_raw(parsed_features["data"], tf.int32)
+            feature_data = tf.reshape(feature_data, meta_dict['data_shape'])
 
-                feature_label = tf.decode_raw(parsed_features["label"], tf.int32)
-                feature_label = tf.reshape(feature_label, [len(lookup_label)])
+            feature_label = tf.decode_raw(parsed_features["label"], tf.int32)
+            feature_label = tf.reshape(feature_label, [len(lookup_label)])
 
-                return feature_image, feature_label
-        else:
-            raise ValueError('TODO !!!!')
+            return feature_data, feature_label
 
         meta_dict['lookup_label'] = lookup_label
         meta_dict['lookup_label_inv'] = lookup_label_inv

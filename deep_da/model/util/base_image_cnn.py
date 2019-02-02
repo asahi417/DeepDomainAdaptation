@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from . import util_tf
+from deep_da.model.util import util_tf
 
 """
 Models used in JDOT paper

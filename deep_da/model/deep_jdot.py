@@ -1,17 +1,22 @@
-""" Deep Joint Distribution Optimal Transport
+""" Joint distribution optimal transportation for domain adaptation
 
-Tensorflow implementation of Deep Joint Distribution Optimal Transport model described in:
-    Damodaran, Bharath Bhushan, et al.
-    "DeepJDOT: Deep Joint distribution optimal transport for unsupervised domain adaptation."
-    arXiv preprint arXiv:1803.10081 (2018).
+Tensorflow implementation of Joint Distribution Optimal Transport model described in:
+    Nicolas Courty, et al.
+    "Joint distribution optimal transportation for domain adaptation"
+    Advances in Neural Information Processing Systems. 2017.
 """
 
 import os
 import numpy as np
+import ot
 import tensorflow as tf
-from .util_tf import variable_summaries, FlipGradientBuilder, StepScheduler, VALID_BASIC_CELL
-from ..util import create_log, raise_error
+from .util.util_tf import variable_summaries, StepScheduler, VALID_BASIC_CELL, dynamic_batch_size, checkpoint_version
+from ..util import create_log
 from ..data import TFRecorder
+from .default_hyperparameter import Parameter
+
+
+TFR = TFRecorder()
 
 
 class DeepJDOT:
@@ -20,38 +25,21 @@ class DeepJDOT:
      Usage
     -----------
     >>> import deep_da
-    >>> model_instance = deep_da.model.DeepJDOT(**parameter)
+    >>> model_instance = deep_da.model.DeepJDOT()
     >>> # train model
     >>> model_instance.train(epoch=10)
 
     """
 
     def __init__(self,
-                 checkpoint_dir: str,
-                 regularizer_config_domain_classification: dict,
-                 regularizer_config_feature_extraction: dict,
-                 learning_rate_config: dict,
-                 path_to_tfrecord_source: str,
-                 path_to_tfrecord_target: str,
-                 config_feature_extractor: dict = None,
-                 config_domain_classifier: dict = None,
-                 config_model: dict = None,
-                 batch: int = 10,
-                 optimizer: str = 'sgd',
-                 weight_decay: float = 0.0,
-                 keep_prob: float = 1.0,
-                 n_thread: int = 4,
-                 ckpt_epoch: int = None,
-                 initializer: str = 'variance_scaling',
-                 batch_for_test: int = 1000,
-                 is_image: bool = True,
-                 base_cell: str = 'cnn',
-                 warm_start: bool = True):
-        """ DANN (Domain Adversarial Neural Network) model
+                 model_checkpoint_version: int=None,
+                 root_dir: str='.',
+                 **kwargs):
+
+        """ Deep JDOT (Joint Distribution Optimal Transport) model
 
          Parameter
         -------------------
-        checkpoint_dir: path to checkpoint directory
         regularizer_config_domain_classification: dictionary of scheduling configuration for domain classification regularizer
         regularizer_config_feature_extraction: dictionary of scheduling configuration for feature extraction regularizer
         learning_rate_config: dictionary of scheduling configuration for learning rate
@@ -73,86 +61,82 @@ class DeepJDOT:
         warm_start: if warm start
         """
 
-        self.__is_image = is_image
+        # setting  hyper parameters
+        checkpoint_dir = os.path.join(root_dir, 'checkpoints')
+        if model_checkpoint_version is None:
+            param_instance = Parameter(
+                'deep_jdot', checkpoint_dir=checkpoint_dir, custom_parameter=kwargs
+            )
+        else:
+            param_instance = Parameter(
+                'deep_jdot', checkpoint_dir=checkpoint_dir, model_checkpoint_version=model_checkpoint_version
+            )
+        self.__alpha_distance = param_instance('alpha_distance')
+        self.__lambda_target_loss = param_instance('lambda_target_loss')
+        self.__learning_rate_config = param_instance('learning_rate_config')
+        self.__config_feature_extractor = param_instance('config_feature_extractor')
+        self.__config_classifier = param_instance('config_classifier')
+        self.__batch = param_instance('batch')
+        self.__optimizer = param_instance('optimizer')
+        self.__weight_decay = param_instance('weight_decay')
+        self.__keep_prob = param_instance('keep_prob')
+        self.__n_thread = param_instance('n_thread')
+        self.__initializer = param_instance('initializer')
+        self.__base_cell = param_instance('base_cell')
+        self.__tfrecord_source = param_instance('tfrecord_source')
+        self.__tfrecord_target = param_instance('tfrecord_target')
+        self.__checkpoint_path = param_instance.checkpoint_path
 
         # tfrecorder
-        self.__read_tf_src, self.__meta_src = TFR.read_tf(dir_to_tfrecord=path_to_tfrecord_source, is_image=is_image)
-        self.__read_tf_tar, self.__meta_tar = TFR.read_tf(dir_to_tfrecord=path_to_tfrecord_target, is_image=is_image)
-        self.__path_to_tfrecord = dict(
+        self.__read_tf_src, self.__meta_src = TFR.read_tf(dir_to_tfrecord=self.__tfrecord_source)
+        self.__read_tf_tar, self.__meta_tar = TFR.read_tf(dir_to_tfrecord=self.__tfrecord_target)
+        self.__tfrecord_path = dict(
             source=dict(
-                train='%s/train.tfrecord' % path_to_tfrecord_source,
-                valid='%s/valid.tfrecord' % path_to_tfrecord_source
+                train=os.path.join(self.__tfrecord_source, 'train.tfrecord'),
+                valid=os.path.join(self.__tfrecord_source, 'valid.tfrecord')
             ),
             target=dict(
-                train='%s/train.tfrecord' % path_to_tfrecord_target,
-                valid='%s/valid.tfrecord' % path_to_tfrecord_target
+                train=os.path.join(self.__tfrecord_target, 'train.tfrecord'),
+                valid=os.path.join(self.__tfrecord_target, 'valid.tfrecord')
             )
         )
 
-        # basic structure
-        if is_image:
-            raise_error(base_cell not in VALID_BASIC_CELL['image'].keys(),
-                        'invalid base_cell: %s not in %s' % (base_cell, VALID_BASIC_CELL['image'].keys()))
-            base_model = VALID_BASIC_CELL['image'][base_cell]
+        # resize width and height to be fit smaller one (source and target)
+        self.__resize = int(np.min(self.__meta_src['data_shape'][0:2] + self.__meta_tar['data_shape'][0:2]))
 
-            # resize width and height to be fit smaller one (source and target)
-            self.__resize = int(np.min(self.__meta_src["image_shape"][0:2] + self.__meta_tar["image_shape"][0:2]))
-
-            # tile channel to be fit larger one (source and target)
-            raise_error(
-                self.__meta_src["image_shape"][-1] not in [1, 3] or self.__meta_tar["image_shape"][-1] not in [1, 3],
-                'invalid shape: tar %s, src %s' % (self.__meta_tar["image_shape"], self.__meta_src["image_shape"]))
-            if self.__meta_tar["image_shape"][-1] == self.__meta_src["image_shape"][-1]:
-                self.__tile_channel = None
-            elif self.__meta_tar["image_shape"][-1] > self.__meta_src["image_shape"][-1]:
-                self.__tile_channel = 'src'
-            else:
-                self.__tile_channel = 'tar'
-            self.__channel = max(self.__meta_tar["image_shape"][-1], self.__meta_src["image_shape"][-1])
-
-            # model configuration
-            self.__feature_extractor = base_model.FeatureExtractor([self.__resize, self.__resize, self.__channel],
-                                                                   **config_feature_extractor)
-            self.__domain_classifier = base_model.DomainClassifier(**config_domain_classifier)
-            self.__model = base_model.Model(**config_model)
+        # tile channel to be fit larger one (source and target)
+        if self.__meta_src['data_shape'][-1] not in [1, 3] or self.__meta_tar['data_shape'][-1] not in [1, 3]:
+                    raise ValueError('invalid shape: tar %s, src %s'
+                                     % (self.__meta_tar['data_shape'], self.__meta_src['data_shape']))
+        if self.__meta_tar['data_shape'][-1] == self.__meta_src['data_shape'][-1]:
+            self.__tile_channel = None
+        elif self.__meta_tar['data_shape'][-1] > self.__meta_src['data_shape'][-1]:
+            self.__tile_channel = 'src'
         else:
-            raise ValueError('TBA')
+            self.__tile_channel = 'tar'
+        self.__channel = max(self.__meta_tar['data_shape'][-1], self.__meta_src['data_shape'][-1])
 
-        # checkpoint
-        if ckpt_epoch is None:
-            self.__checkpoint = '%s/model.ckpt' % checkpoint_dir
-        else:
-            self.__checkpoint = '%s/model-%i.ckpt' % (checkpoint_dir, ckpt_epoch)
+        # base model component configuration
+        if self.__base_cell not in VALID_BASIC_CELL.keys():
+            raise ValueError('invalid base_cell: %s not in %s' % (self.__base_cell, VALID_BASIC_CELL.keys()))
+        base_model = VALID_BASIC_CELL[self.__base_cell]
+        shape_input = [self.__resize, self.__resize, self.__channel]
+        self.__feature_extractor = base_model.FeatureExtractor(shape_input, **self.__config_feature_extractor)
+        self.__classifier = base_model.Model(**self.__config_classifier)
 
-        # training parameters
-        self.__batch = batch
-        self.__optimizer = optimizer
-        self.__weight_decay = weight_decay
-        self.__keep_prob = keep_prob
-        self.__n_thread = n_thread
-        self.__initializer = initializer
-        self.__batch_for_test = batch_for_test
-
-        self.__lr_config = learning_rate_config
-        self.__reg_config_dc = regularizer_config_domain_classification
-        self.__reg_config_fe = regularizer_config_feature_extraction
-
-        self.__logger = create_log('%s/log' % checkpoint_dir)
-
-        self.__logger.info('BUILD DANN GRAPH')
+        # create tensorflow graph
+        self.__logger = create_log(os.path.join(self.__checkpoint_path, 'training.log'))
+        self.__logger.info('BUILD DeepJDOT TENSORFLOW GRAPH')
         self.__build_graph()
-
         self.__session = tf.Session(config=tf.ConfigProto(log_device_placement=False))
-
-        self.__writer = tf.summary.FileWriter('%s/summary' % checkpoint_dir, self.__session.graph)
+        self.__writer = tf.summary.FileWriter('%s/summary' % self.__checkpoint_path, self.__session.graph)
 
         # load model
-        if os.path.exists('%s.meta' % self.__checkpoint) and warm_start:
-            self.__logger.info('load variable from %s' % self.__checkpoint)
-            self.__saver.restore(self.__session, self.__checkpoint)
+        if os.path.exists(os.path.join(self.__checkpoint_path, 'model.ckpt.meta')):
+            self.__logger.info('load model from %s' % self.__checkpoint_path)
+            self.__saver.restore(self.__session, os.path.join(self.__checkpoint_path, 'model.ckpt'))
             self.__warm_start = True
         else:
-            os.makedirs(checkpoint_dir, exist_ok=True)
             self.__session.run(tf.global_variables_initializer())
             self.__warm_start = False
 
@@ -175,17 +159,16 @@ class DeepJDOT:
 
         if is_source:
             tf_reader = self.__read_tf_src
-            path_to_tfrecord = self.__path_to_tfrecord['source']
+            tfrecord = self.__tfrecord_path['source']
         else:
             tf_reader = self.__read_tf_tar
-            path_to_tfrecord = self.__path_to_tfrecord['target']
+            tfrecord = self.__tfrecord_path['target']
 
-        tfrecord_name = tf.where(is_training, path_to_tfrecord['train'], path_to_tfrecord['valid'])
-        batch = tf.where(is_training, batch, self.__batch_for_test)
+        tfrecord_name = tf.where(is_training, tfrecord['train'], tfrecord['valid'])
         data_set_api = tf.data.TFRecordDataset(tfrecord_name, compression_type='GZIP')
         # convert record to tensor
         data_set_api = data_set_api.map(tf_reader, self.__n_thread)
-        # set batch size
+        # set buffer size
         # buffer_size = tf.where(is_training, 10000 if is_source else 60000, 1000)
         buffer_size = 5000
         data_set_api = data_set_api.shuffle(buffer_size=tf.cast(buffer_size, tf.int64))
@@ -196,7 +179,24 @@ class DeepJDOT:
         return iterator, iterator_ini
 
     def __build_graph(self):
-        # initializer
+        """ build tensorflow graph
+
+        G_f : feature extractor
+        G_dc: domain classifier
+        G_m : main task-specific model
+
+        (x_t, y_t) ~ target
+        (x_s, y_s) ~ source
+
+        loss = L_main{ G_m(G_f(x_s)), y_s } - r_dc * L_da{ G_m(G_f(x_s)), G_m(G_f(x_t)) | r_fe }
+
+        * Note: r_dc is regularization term for domain classification, and r_fe is coefficient to scale amount of
+                propagation by feature extractor
+        """
+
+        ##################
+        # initialization #
+        ##################
         if self.__initializer == 'variance_scaling':
             initializer = tf.contrib.layers.variance_scaling_initializer()
         elif self.__initializer == 'truncated_normal':
@@ -206,121 +206,127 @@ class DeepJDOT:
 
         self.learning_rate = tf.placeholder_with_default(0.0, [], name='learning_rate')
         self.is_training = tf.placeholder_with_default(False, [])
-        self.seed = tf.placeholder_with_default(0, [])
-
         __keep_prob = tf.where(self.is_training, self.__keep_prob, 1.0)
         __weight_decay = tf.where(self.is_training, self.__weight_decay, 0.0)
 
         # TFRecord
-        iterator_src, self.__iterator_ini_src = self.__tfrecord(
-            self.__batch, self.is_training, is_source=True, seed=self.seed
-        )
+        iterator_src, self.__iterator_ini_src = self.__tfrecord(self.__batch, self.is_training, is_source=True)
+        iterator_tar, self.__iterator_ini_tar = self.__tfrecord(self.__batch, self.is_training, is_source=False)
 
-        iterator_tar, self.__iterator_ini_tar = self.__tfrecord(
-            self.__batch, self.is_training, is_source=False
-        )
+        # get next input (label is one hot vector)
+        image_src, label_src = iterator_src.get_next()
+        image_tar, label_tar = iterator_tar.get_next()
 
-        # get next input
-        image_tar, tag_tar = iterator_tar.get_next()
-        tag_tar = tf.cast(tag_tar, tf.float32)
+        ##########################
+        # preprocess to get data #
+        ##########################
 
-        image_src, tag_src = iterator_src.get_next()
-        tag_src = tf.cast(tag_src, tf.float32)
+        self.label_src = tf.cast(label_src, tf.float32)
+        self.label_tar = tf.cast(label_tar, tf.float32)
 
-        with tf.variable_scope('classifier', initializer=initializer):
-            ##############
-            # preprocess #
-            ##############
-            tag_src = tf.cast(tag_src, tf.float32)
+        # resizing data
+        if self.__resize is not None:
+            image_tar = tf.image.resize_image_with_crop_or_pad(image_tar, self.__resize, self.__resize)
+            image_src = tf.image.resize_image_with_crop_or_pad(image_src, self.__resize, self.__resize)
+            tar_shape = [self.__resize, self.__resize, 3]
+            src_shape = [self.__resize, self.__resize, 3]
 
-            # resizing data
-            if self.__resize is not None:
-                image_tar = tf.image.resize_image_with_crop_or_pad(image_tar, self.__resize, self.__resize)
-            # tiling image for channel
-            if self.__tile_channel:
-                image_tar = tf.tile(image_tar, [1, 1, 1, 3])
-
-            # make the channel in between [-1, 1]
-            image_src = tf.cast(image_src, tf.float32) / 225 * 2 - 1
-            image_tar = tf.cast(image_tar, tf.float32) / 225 * 2 - 1
-
-            ###################
-            # overall network #
-            ###################
-            # universal feature extraction (`embedding` in context of deep JDOT)
-            embedding_src = self.__feature_extractor(image_src, __keep_prob)
-            embedding_tar = self.__feature_extractor(image_tar, reuse=True)
-
-            embed_src = tf.expand_dims(embedding_src, 0)  # 1, batch, dim
-            embed_src = tf.tile(embed_src, [self.__batch, 1, 1])  # batch, batch, dim
-
-            embed_tar = tf.expand_dims(embedding_tar, 0)  # 1, batch, dim
-            embed_tar = tf.transpose(embed_tar, [1, 0, 2])  # batch, 1, dim
-            embed_tar = tf.tile(embed_tar, [1, self.__batch, 1])  # batch, batch, dim
-
-            diff = embed_src - embed_tar
-
-            # embedding distance: L2 loss (batch, batch)
-            embedding_distance = tf.reduce_sum(diff * diff, axis=-1)
-
-            # classifier
-            pred_prob_src = self.__model(embedding_src)
-            pred_prob_tar = self.__model(embedding_tar, reuse=True)
-
-            pp_src = tf.expand_dims(tag_src, 0)  # 1, batch, dim
-            pp_src = tf.tile(pp_src, [self.__batch, 1, 1])  # batch, batch, dim
-
-            pp_tar = tf.expand_dims(pred_prob_tar, 0)  # 1, batch, dim
-            pp_tar = tf.transpose(pp_tar, [1, 0, 2])  # batch, 1, dim
-            pp_tar = tf.tile(pp_tar, [1, self.__batch, 1])  # batch, batch, dim
-
-            # output distance: cross entropy (batch, batch)
-            output_distance = tf.reduce_mean(pp_src * tf.log(pp_tar + 1e-6), axis=-1)
-
-            # joint distance
-            joint_distance = \
-                self.__distance_coefficient_output * output_distance \
-                + self.__distance_coefficient_embedding * embedding_distance
-
-            # output distance (source only)
-            output_distance_src = tf.reduce_mean(tag_src * tf.log(pred_prob_src + 1e-6), axis=1)
-
-        # accuracy
-        self.__accuracy_src = tf.reduce_mean(
-            tf.cast(
-                tf.equal(tf.argmax(tag_src, axis=1), tf.argmax(pred_prob_src, axis=1)), tf.float32
-            )
-        )
-
-        self.__accuracy_tar = tf.reduce_mean(
-            tf.cast(
-                tf.equal(tf.argmax(tag_tar, axis=1), tf.argmax(pred_prob_tar, axis=1)), tf.float32
-            )
-        )
-
-        with tf.variable_scope('optimal_transport', initializer=initializer):
-            # transport matrix is constrained on simplex (sum of each element must be 1)
-            tm = tf.get_variable("transport_matrix", shape=[self.__batch * self.__batch], dtype=tf.float32)
-            tm = tf.nn.softmax(tm)
-            tm = tf.reshape(tm, [self.__batch, self.__batch])
-            transport = tf.reduce_sum(tm * joint_distance)
-
-        ################
-        # optimization #
-        ################
-        self.__loss_ot = transport
-        self.__loss_model = transport + tf.reduce_mean(output_distance_src)
-        var_ot = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='optimal_transport')
-        var_model = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope='classifier')
-
-        if __weight_decay != 0.0:  # L2
-            l2_ot = __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in var_ot])
-            l2_model = __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in var_model])
         else:
-            l2_ot = l2_model = 0.0
+            tar_shape = self.__meta_tar['data_shape'][0, 1] + [3]
+            src_shape = self.__meta_src['data_shape'][0, 1] + [3]
 
-        gradient_ot = tf.gradients(self.__loss_ot + l2_ot, var_ot)
-        gradient_model = tf.gradients(self.__loss_model + l2_model, var_model)
+        # tiling image for channel (all the data will be converted to have channel size 3)
+        if self.__tile_channel == 'tar':
+            image_tar = tf.tile(image_tar, [1, 1, 1, 3])
+        elif self.__tile_channel == 'src':
+            image_src = tf.tile(image_src, [1, 1, 1, 3])
+
+        # make the channel in between [-1, 1]
+        self.data_src = tf.cast(image_src, tf.float32) / 225 * 2 - 1
+        self.data_tar = tf.cast(image_tar, tf.float32) / 225 * 2 - 1
+
+        ###################
+        # overall network #
+        ###################
+
+        self.data_src_ph = tf.placeholder(tf.float32, shape=[None] + src_shape, name='source_data')
+        self.label_src_ph = tf.placeholder(tf.float32, shape=[None], name='source_label')
+
+        self.data_tar_ph = tf.placeholder(tf.float32, shape=[None] + tar_shape, name='data_tar_ph')
+        self.label_tar_ph = tf.placeholder(tf.float32, shape=[None], name='target_label')
+
+        batch_size = dynamic_batch_size(self.data_src_ph)
+
+        # universal feature extraction
+        with tf.variable_scope('feature_extraction', initializer=initializer):
+            feature_src = self.__feature_extractor(self.data_src_ph, __keep_prob)
+            feature_tar = self.__feature_extractor(self.data_tar_ph, reuse=True)
+
+            # COST MATRIX FOR OPTIMAL TRANSPORT (INPUT)
+            # For source feature {f^s_i}_i=1~n, and target feature {f^t_i}_i=1~n, we need to calculate distance for
+            # each combinations of features.
+            # [t_1, t_2, t_3], [s_1, s_2, s_3]
+            # S = [s_1, s_1, s_1, s_2, s_2, s_2, s_3, s_3, s_3]
+            # T = [t_1, t_2, t_3, t_1, t_2, t_3, t_1, t_2, t_3]
+            # loss = distance(T, S)
+            # loss = reshape(loss, (3, 3))
+            # [
+            #   [[s_1, t_1], [s_1, t_2], [s_1, t_3]],
+            #    [s_2, t_1], [s_2, t_2], [s_2, t_3]],
+            #    [s_3, t_1], [s_3, t_2], [s_3, t_3]]]
+            # ]
+            feature_src_tiled = tf.concat(
+                tf.tile(
+                    tf.expand_dims(feature_src, -1),
+                    [1, 1, batch_size]),
+                axis=-1)
+            feature_tar_tiled = tf.tile(feature_tar, [batch_size, 1])
+            diff = feature_tar_tiled - feature_src_tiled
+            ot_cost_matrix = tf.reshape(
+                tf.reduce_sum(diff*diff, axis=1),
+                (batch_size, batch_size))
+
+        # task-specific model
+        with tf.variable_scope('model', initializer=initializer):
+            pred_prob_src = self.__classifier(feature_src)
+            pred_prob_tar = self.__classifier(feature_tar, reuse=True)
+
+            # COST MATRIX FOR OPTIMAL TRANSPORT (OUTPUT)
+            # - label: [l_1, l_2, l_3]
+            # - estimate:[e_1, e_2, e_3]
+            # L = [l_1, l_1, l_1, l_2, l_2, l_2, l_3, l_3, l_3]
+            # E = [e_1, e_2, e_3, e_1, e_2, e_3, e_1, e_2, e_3]
+            # loss = distance(L, E)
+            # loss = reshape(loss, (3, 3))
+            # [
+            #   [[l_1, t_1], [l_1, t_2], [l_1, e_3]],
+            #    [l_2, e_1], [l_2, e_2], [l_2, e_3]],
+            #    [l_3, e_1], [l_3, e_2], [l_3, e_3]]]
+            # ]
+            source_label_tiled = tf.concat(
+                tf.tile(
+                    tf.expand_dims(self.label_src_ph, -1),
+                    [1, 1, batch_size]),
+                axis=-1)
+            pred_prob_tar_tiled = tf.tile(pred_prob_tar, [batch_size, 1])
+            prediction_loss = - tf.reduce_mean(source_label_tiled * tf.log(pred_prob_tar_tiled + 1e-6))
+            ot_prediction_loss_matrix = tf.reshape(
+                tf.reduce_sum(prediction_loss, axis=1),
+                (batch_size, batch_size))
+
+            self.cost_matrix = \
+                ot_prediction_loss_matrix * self.__lambda_target_loss + ot_cost_matrix * self.__alpha_distance
+
+            # LOSS FOR UPDATE CLASSIFIER
+            self.optimal_transport = tf.placeholder(tf.float32, shape=[None, None], name='optimal_transport')
+            loss_transport = tf.reduce_sum(self.optimal_transport * self.cost_matrix)
+            loss_model_src = - tf.reduce_mean(label_src * tf.log(pred_prob_src + 1e-6))
+            loss_total = loss_model_src + loss_transport
+
+        ####################################
+        # optimization (update classifier) #
+        ####################################
+        trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
 
         # optimizer
         if self.__optimizer == 'sgd':
@@ -330,12 +336,31 @@ class DeepJDOT:
         elif self.__optimizer == 'momentum':
             optimizer = tf.train.MomentumOptimizer(self.learning_rate, 0.9)
         else:
-            raise ValueError('unknown optimizer !!')
+            raise ValueError('unknown optimizer: %s' % self.__optimizer)
 
-        # self.__train_op = optimizer.apply_gradients(zip(gradient, trainable_variables))
-        with tf.control_dependencies(gradient_ot + gradient_model):
-            self.__train_op_model = optimizer.apply_gradients(zip(gradient_model, var_model))
-            self.__train_op_ot = optimizer.apply_gradients(zip(gradient_ot, var_ot))
+        # L2 weight decay
+        if __weight_decay != 0.0:
+            l2 = __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in trainable_variables])
+        else:
+            l2 = 0.0
+
+        # optimization
+        gradient = tf.gradients(loss_total + l2, trainable_variables)
+        self.__train_op = optimizer.apply_gradients(zip(gradient, trainable_variables))
+
+        # accuracy
+        accuracy_src = tf.reduce_mean(
+            tf.cast(
+                tf.equal(tf.argmax(label_src, axis=1), tf.argmax(pred_prob_src, axis=1)), tf.float32
+            )
+        )
+        # only validation purpose (not used in training model)
+        loss_model_tar = - tf.reduce_mean(label_tar * tf.log(pred_prob_tar + 1e-6))
+        accuracy_tar = tf.reduce_mean(
+            tf.cast(
+                tf.equal(tf.argmax(label_tar, axis=1), tf.argmax(pred_prob_tar, axis=1)), tf.float32
+            )
+        )
 
         # saver
         self.__saver = tf.train.Saver()
@@ -343,205 +368,145 @@ class DeepJDOT:
         ##################
         # scalar summary #
         ##################
-        self.__summary_src = tf.summary.merge([
-            tf.summary.scalar('accuracy_src', self.__accuracy_src)
-        ])
+        def weight_to_image(tensor):
+            return tf.expand_dims(tf.expand_dims(tensor, 0), -1)
 
-        self.__summary_tar = tf.summary.merge([
-            tf.summary.scalar('accuracy_tar', self.__accuracy_tar)
-        ])
-
-        self.__summary = tf.summary.merge([
+        self.__summary_train = tf.summary.merge([
             tf.summary.scalar('meta_learning_rate', self.learning_rate),
+            tf.summary.scalar('meta_alpha_distance', self.__alpha_distance),
+            tf.summary.scalar('meta_lambda_target_loss', self.__lambda_target_loss),
             tf.summary.scalar('meta_keep_prob', __keep_prob),
             tf.summary.scalar('meta_weight_decay', __weight_decay),
-            tf.summary.scalar('accuracy_src', self.__accuracy_src),
-            tf.summary.scalar('accuracy_tar', self.__accuracy_tar),
+            tf.summary.image('cost_matrix', weight_to_image(self.cost_matrix), 1),
+            tf.summary.image('optimal_transport', weight_to_image(self.optimal_transport), 1),
+            tf.summary.scalar('eval_train_loss_model_src', loss_model_src),
+            tf.summary.scalar('eval_train_loss_model_tar', loss_model_tar),
+            tf.summary.scalar('eval_train_accuracy_src', accuracy_src),
+            tf.summary.scalar('eval_train_accuracy_tar', accuracy_tar)
+        ])
+
+        self.__summary_valid = tf.summary.merge([
+            tf.summary.scalar('meta_valid_keep_prob', __keep_prob),
+            tf.summary.scalar('meta_valid__weight_decay', __weight_decay),
+            tf.summary.scalar('eval_valid_loss_model_tar', loss_model_tar),
+            tf.summary.scalar('eval_valid_loss_model_src', loss_model_src),
+            tf.summary.scalar('eval_valid_accuracy_src', accuracy_src),
+            tf.summary.scalar('eval_valid_accuracy_tar', accuracy_tar)
         ])
 
         n_var = 0
 
-        for var in tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES):
+        var_stat = []
+        for var in trainable_variables:
             sh = var.get_shape().as_list()
-            self.__log('%s: %s' % (var.name, str(sh)))
+            self.__logger.info('%s: %s' % (var.name, str(sh)))
+            var_stat.extend(variable_summaries(var, var.name.split(':')[0]))
             n_var += np.prod(sh)
 
-        self.__log('total variables: %i' % n_var)
-
-    def __log(self, statement):
-        if self.__logger is not None:
-            self.__logger.info(statement)
+        self.__summary_train_var = tf.summary.merge(var_stat)
+        self.__logger.info('total variables: %i' % n_var)
 
     def train(self, epoch: int):
+        """
 
-        self.__log('checkpoint (%s), epoch (%i), learning rate (%0.7f)'
-                   % (self.__checkpoint_dir, epoch, self.__ini_learning_rate))
+        classifier: tensorflow
+        optimal transport:
+
+
+        :param epoch:
+        :return:
+        """
 
         if self.__warm_start:
-            meta = np.load('%s/meta.npz' % self.__checkpoint_dir)
+            meta = np.load(os.path.join(self.__checkpoint_path, 'meta.npz'))
             i_summary_train = int(meta['i_summary_train'])
             i_summary_valid = int(meta['i_summary_valid'])
-            i_summary_valid_tar_train = int(meta['i_summary_valid_tar_train'])
-            i_summary_valid_tar_valid = int(meta['i_summary_valid_tar_valid'])
+            i_summary_train_var = int(meta['i_summary_train_var'])
             ini_epoch = int(meta['epoch'])
-            learning_rate = meta['learning_rate']
         else:
-            i_summary_train = 0
-            i_summary_valid = 0
-            i_summary_valid_tar_train = 0
-            i_summary_valid_tar_valid = 0
-            ini_epoch = 0
-            if self.__ini_learning_rate is None:
-                raise ValueError('provide learning rate !')
-            learning_rate = self.__ini_learning_rate
+            ini_epoch, i_summary_train, i_summary_valid, i_summary_train_var = 0, 0, 0, 0
 
-        self.__log('checkpoint (%s), epoch (%i)' % (self.__checkpoint_dir, epoch))
+        self.__logger.info('checkpoint (%s), epoch (%i)' % (self.__checkpoint_path, epoch))
+        scheduler_lr = StepScheduler(current_epoch=ini_epoch, **self.__learning_rate_config)
+        e = -1
 
-        scheduler_lr = StepScheduler(
-            initial_step=learning_rate,
-            current_epoch=ini_epoch,
-            **self.__scheduler_lr)
+        try:
 
-        for e in range(ini_epoch, ini_epoch+epoch):
+            for e in range(ini_epoch, ini_epoch+epoch):
 
-            acc_train, acc_valid, acc_valid_tar_train, acc_valid_tar_valid = [], [], [], []
+                self.__logger.info('epoch %i/%i' % (e, ini_epoch+epoch))
 
-            #########
-            # Train #
-            #########
-            self.__session.run([self.__iterator_ini_src], feed_dict={self.is_training: True})
-            n = 0
+                self.__logger.info(' - training')
+                self.__session.run([self.__iterator_ini_src, self.__iterator_ini_tar],
+                                   feed_dict={self.is_training: True})
+                while True:
+                    try:
+                        # Fetch data
+                        data_src, data_tar, label_src, label_tar = self.__session.run(
+                            [self.data_src, self.data_tar, self.label_src, self.label_tar]
+                        )
 
-            feed_train = {self.learning_rate: scheduler_lr(),
-                          self.is_training: True}
+                        # Update optimal transport (fix classifier)
+                        cost_matrix = self.__session.run(
+                            self.cost_matrix,
+                            feed_dict={
+                                self.data_src_ph: data_src,
+                                self.data_tar_ph: data_tar,
+                                self.label_src_ph: label_src,
+                                self.label_tar_ph: label_tar,
+                                self.is_training: False  # turn off dropout
+                            }
+                        )
+                        optimal_transport = ot.emd(a=[], b=[], M=cost_matrix)
 
-            while True:
-                n += 1
-                self.__session.run([self.__iterator_ini_tar], feed_dict={self.is_training: True})
-                try:
+                        # Update classifier (fix optimal transport)
+                        summary_train, _ = self.__session.run(
+                            [self.__summary_train, self.__train_op],
+                            feed_dict={
+                                self.data_src_ph: data_src,
+                                self.data_tar_ph: data_tar,
+                                self.label_src_ph: label_src,
+                                self.label_tar_ph: label_tar,
+                                self.is_training: True,
+                                self.learning_rate: scheduler_lr(),
+                                self.optimal_transport: optimal_transport
+                            }
+                        )
 
-                    val = [
-                        self.__accuracy_tar,
-                        self.__accuracy_src,
-                        self.__summary,
-                        self.__train_op_ot,
-                        self.__train_op_model
-                    ]
-                    acc_tar, acc_src, summary, _, _ = self.__session.run(val, feed_dict=feed_train)
+                        # Write tensorboard
+                        self.__writer.add_summary(summary_train, i_summary_train)  # write tensorboard writer
+                        i_summary_train += 1  # time stamp for tf summary
+                    except tf.errors.OutOfRangeError:
+                        break
 
-                    acc_train.append(acc_src)
-                    acc_valid_tar_train.append(acc_tar)
+                self.__logger.info(' - validation')
+                self.__session.run([self.__iterator_ini_src, self.__iterator_ini_tar],
+                                   feed_dict={self.is_training: False})
+                while True:
+                    try:
+                        summary_valid = self.__session.run(self.__summary_valid,
+                                                           feed_dict={self.is_training: False})
+                        self.__writer.add_summary(summary_valid, i_summary_valid)  # write tensorboard writer
+                        i_summary_valid += 1  # time stamp for tf summary
+                    except tf.errors.OutOfRangeError:
+                        break
 
-                    # write tensorboard writer
-                    self.__writer_train.add_summary(summary, i_summary_train)
-                    i_summary_train += 1  # time stamp for tf summary
+                if e % 20 == 0:  # every 20 epoch, save statistics of weights
+                    summary_train_var = self.__session.run(self.__summary_train_var,
+                                                           feed_dict={self.is_training: False})
+                    self.__writer.add_summary(summary_train_var, i_summary_train_var)  # write tensorboard writer
+                    i_summary_train_var += 1  # time stamp for tf summary
 
-                except tf.errors.OutOfRangeError:
-                    if e == 0:
-                        print('- %i iterations: source train' % n)
-                    break
+            self.__logger.info('Complete training')
 
-            ########
-            # Test #
-            ########
+        except KeyboardInterrupt:
+            self.__logger.info('KeyboardInterrupt')
 
-            # source data: valid
-            self.__session.run([self.__iterator_ini_src], feed_dict={self.is_training: False})
-            n = 0
+        self.__logger.info('Save checkpoints......')
+        self.__saver.save(self.__session, os.path.join(self.__checkpoint_path, 'model.ckpt'))
 
-            while True:
-                n += 1
-                try:
-                    val = [
-                        self.__accuracy_src,
-                        self.__summary_src
-                    ]
-                    acc, summary = self.__session.run(val, feed_dict={self.is_training: False})
-                    acc_valid.append(acc)
-
-                    # write tensorboard writer
-                    self.__writer_valid.add_summary(summary, i_summary_valid)
-                    i_summary_valid += 1  # time stamp for tf summary
-
-                except tf.errors.OutOfRangeError:
-                    if e == 0:
-                        print('- %i iterations: source valid' % n)
-                    break
-
-            # target data: train
-            self.__session.run([self.__iterator_ini_tar], feed_dict={self.is_training: True})
-            n = 0
-
-            while True:
-                n += 1
-                try:
-                    val = [
-                        self.__accuracy_tar,
-                        self.__summary_tar
-                    ]
-                    acc, summary = self.__session.run(val, feed_dict={self.is_training: True})
-                    acc_valid_tar_train.append(acc)
-
-                    # write tensorboard writer
-                    self.__writer_valid_tar_train.add_summary(summary, i_summary_valid_tar_train)
-                    i_summary_valid_tar_train += 1  # time stamp for tf summary
-
-                except tf.errors.OutOfRangeError:
-                    if e == 0:
-                        print('- %i iterations: target train' % n)
-                    break
-
-            # target data: valid
-            self.__session.run([self.__iterator_ini_tar], feed_dict={self.is_training: False})
-            n = 0
-
-            while True:
-                n += 1
-                try:
-                    val = [
-                        self.__accuracy_tar,
-                        self.__summary_tar
-                    ]
-                    acc, summary = self.__session.run(val, feed_dict={self.is_training: False})
-                    acc_valid_tar_valid.append(acc)
-
-                    # write tensorboard writer
-                    self.__writer_valid_tar_valid.add_summary(summary, i_summary_valid_tar_valid)
-                    i_summary_valid_tar_valid += 1  # time stamp for tf summary
-
-                except tf.errors.OutOfRangeError:
-                    if e == 0:
-                        print('- %i iterations: target valid' % n)
-                    break
-
-            #######
-            # log #
-            #######
-            self.__log('epoch %i: valid (tar: %0.3f, src: %0.3f) train (tar: %0.3f, src: %0.3f)'
-                       % (e,
-                          float(np.mean(acc_valid_tar_valid)),
-                          float(np.mean(acc_valid)),
-                          float(np.mean(acc_valid_tar_train)),
-                          float(np.mean(acc_train))
-                          )
-                       )
-
-        self.__log('FINISH SUCCESSFULLY !!')
-        self.__saver.save(self.__session, self.__checkpoint)
-
-        np.savez('%s/meta.npz' % self.__checkpoint_dir,
-                 learning_rate=learning_rate,
-                 epoch=e+1,
+        np.savez(os.path.join(self.__checkpoint_path, 'meta.npz'),
+                 epoch=e + 1,
                  i_summary_train=i_summary_train,
                  i_summary_valid=i_summary_valid,
-                 i_summary_valid_tar_train=i_summary_valid_tar_train,
-                 i_summary_valid_tar_valid=i_summary_valid_tar_valid
-                 )
-
-
-
-
-
-
-
-
+                 i_summary_train_var=i_summary_train_var)

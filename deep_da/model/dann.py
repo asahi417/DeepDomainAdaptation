@@ -9,7 +9,7 @@ Tensorflow implementation of adversarial training based domain adaptation model 
 import os
 import numpy as np
 import tensorflow as tf
-from .util_tf import variable_summaries, FlipGradientBuilder, StepScheduler, VALID_BASIC_CELL
+from deep_da.model.util.util_tf import variable_summaries, FlipGradientBuilder, StepScheduler, VALID_BASIC_CELL
 from ..util import create_log, raise_error
 from ..data import TFRecorder
 

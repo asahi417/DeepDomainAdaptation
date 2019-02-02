@@ -30,7 +30,7 @@ class SVHN:
         mat = scipy.io.loadmat(filename)
 
         return dict(
-            image=np.transpose(mat['X'], [3, 0, 1, 2]),
+            data=np.transpose(mat['X'], [3, 0, 1, 2]),
             label=mat['y'][:, 0]
         )
 
@@ -60,9 +60,9 @@ class SVHN:
         label = np.zeros(len(self.__lookup_label))
         label[self.__lookup_label[label_index]] = 1
 
-        img = self.__data[self.__data_type]['image'][self.__ind]
+        img = self.__data[self.__data_type]['data'][self.__ind]
         result = dict(
-            image=img.astype(np.int32),
+            data=img.astype(np.int32),
             label=label.astype(np.int32)
         )
         self.__ind += 1
@@ -76,6 +76,6 @@ class SVHN:
             meta_dict = dict(
                 label_size=len(self.__lookup_label),
                 size=self.__data_size,
-                image_shape=(32, 32, 3)
+                data_shape=(32, 32, 3)
             )
             json.dump(meta_dict, f)

@@ -1,6 +1,6 @@
 import numpy as np
 import tensorflow as tf
-from . import util_tf
+from deep_da.model.util import util_tf
 
 """
 Models used in DANN paper
@@ -114,7 +114,7 @@ class DomainClassifier:
 
         with tf.variable_scope(scope or "domain_classifier", reuse=reuse):
             def fc(_feature, _n):
-                _feature = util_tf.full_connected(_feature, [n_hidden[_n], n_hidden[_n+1]], scope='fc_%i' % _n)
+                _feature = util_tf.full_connected(_feature, [n_hidden[_n], n_hidden[_n + 1]], scope='fc_%i' % _n)
                 return _feature
 
             for i in range(3):

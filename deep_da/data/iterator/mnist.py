@@ -17,11 +17,11 @@ class MNIST:
         self.__data_size = dict(train=60000, valid=10000)
         self.__data = dict(
             train=dict(
-                image=self.image(self.__path_to_data['train']['image'], 60000),
+                data=self.image(self.__path_to_data['train']['image'], 60000),
                 label=self.label(self.__path_to_data['train']['label'], 60000)
             ),
             valid=dict(
-                image=self.image(self.__path_to_data['valid']['image'], 10000),
+                data=self.image(self.__path_to_data['valid']['image'], 10000),
                 label=self.label(self.__path_to_data['valid']['label'], 10000)
             )
         )
@@ -68,9 +68,9 @@ class MNIST:
             raise StopIteration
         label = np.zeros(len(self.__lookup_label))
         label[self.__lookup_label[self.__data[self.__data_type]['label'][self.__ind]]] = 1
-        img = self.__data[self.__data_type]['image'][self.__ind]
+        img = self.__data[self.__data_type]['data'][self.__ind]
         result = dict(
-            image=img.astype(np.int32),
+            data=img.astype(np.int32),
             label=label.astype(np.int32)
         )
         self.__ind += 1
@@ -84,6 +84,6 @@ class MNIST:
             meta_dict = dict(
                 label_size=len(self.__lookup_label),
                 size=self.__data_size,
-                image_shape=(28, 28, 1)
+                data_shape=(28, 28, 1)
             )
             json.dump(meta_dict, f)
