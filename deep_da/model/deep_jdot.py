@@ -497,10 +497,10 @@ class DeepJDOT:
                     self.__writer.add_summary(summary_train_var, i_summary_train_var)  # write tensorboard writer
                     i_summary_train_var += 1  # time stamp for tf summary
 
-            self.__logger.info('Complete training')
+            self.__logger.info('Completed :)')
 
         except KeyboardInterrupt:
-            self.__logger.info('KeyboardInterrupt')
+            self.__logger.info('KeyboardInterrupt :(')
 
         self.__logger.info('Save checkpoints......')
         self.__saver.save(self.__session, os.path.join(self.__checkpoint_path, 'model.ckpt'))
