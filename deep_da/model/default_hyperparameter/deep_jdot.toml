@@ -2,8 +2,6 @@
 
 batch=500
 optimizer='adam'
-weight_decay=1e-8
-is_image=true
 base_cell='cnn'
 alpha_distance=0.001
 lambda_target_loss=0.0001
@@ -12,8 +10,8 @@ n_thread=4
 weight_decay=0.0
 initializer='variance_scaling'
 base_cell='cnn'
-tfrecord_source='./tfrecord/svhn'
-tfrecord_target='./tfrecord/mnist'
+tfrecord_source='tfrecord/svhn'
+tfrecord_target='tfrecord/mnist'
 
 [learning_rate_config]
 identity=true
