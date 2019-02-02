@@ -9,6 +9,7 @@ setup(
     name='deep_da',
     version=FULL_VERSION,
     description='Deep learning based domain adaptation algorithms.',
+    url='https://github.com/asahi417/DeepDomainAdaptation',
     long_description=readme,
     author='Asahi Ushio',
     author_email='aushio@keio.jp',
