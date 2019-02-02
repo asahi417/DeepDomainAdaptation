@@ -9,8 +9,14 @@ build
 *.egg-info
 dist
 
-word_embeddings
+.pyenv_dda
+dataset/mnist/train-images-idx3-ubyte.gz
+dataset/mnist/train-labels-idx1-ubyte.gz
+dataset/mnist/t10k-images-idx3-ubyte.gz
+dataset/mnist/t10k-labels-idx1-ubyte.gz
+dataset/svhn/train_32x32.mat
+dataset/svhn/test_32x32.mat
+
+
 checkpoint
-dataset
 tfrecord
-bin

@@ -12,21 +12,20 @@ setup(
     long_description=readme,
     author='Asahi Ushio',
     author_email='aushio@keio.jp',
-    packages=find_packages(exclude=('tests', 'dataset')),
-    # package_data={'': ['*.json']},
+    packages=find_packages(exclude=('test', 'dataset', 'random', 'tfrecord', 'checkpoint')),
     include_package_data=True,
-    test_suite='tests',
+    test_suite='test',
     install_requires=[
         'tensorflow-gpu',
-        'gensim',
-        'numpy',
-        'pandas',
         'scipy',
-        'nltk',
+        'numpy',
         'toml',
-        'sklearn',
-        'flask',
-        'werkzeug',
-        'Pillow'
+        'POT'
+        # 'Pillow'
+        # 'pandas',
+        # 'nltk',
+        # 'sklearn',
+        # 'flask',
+        # 'werkzeug',
     ]
 )
