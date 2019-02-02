@@ -20,3 +20,4 @@ dataset/svhn/test_32x32.mat
 
 checkpoint
 tfrecord
+dataset/svhn/extra_32x32.mat
