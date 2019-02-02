@@ -36,7 +36,7 @@ CONFIG = {
 
 def get_options(parser):
     share_param = {'nargs': '?', 'action': 'store', 'const': None, 'choices': None, 'metavar': None}
-    parser.add_argument('--data', help='dataset name in %s' % CONFIG['RAW_DATA'].keys(), required=True, type=str, **share_param)
+    parser.add_argument('--data', help='dataset name in %s' % CONFIG.keys(), required=True, type=str, **share_param)
     return parser.parse_args()
 
 
