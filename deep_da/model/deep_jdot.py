@@ -62,7 +62,7 @@ class DeepJDOT:
         """
 
         # setting  hyper parameters
-        checkpoint_dir = os.path.join(root_dir, 'checkpoints')
+        checkpoint_dir = os.path.join(root_dir, 'checkpoint')
         if model_checkpoint_version is None:
             param_instance = Parameter(
                 'deep_jdot', checkpoint_dir=checkpoint_dir, custom_parameter=kwargs
