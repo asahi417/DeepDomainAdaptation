@@ -15,6 +15,15 @@ VALID_BASIC_CELL = dict(
 )
 
 
+def dynamic_batch_size(inputs):
+    """ Dynamic batch size, which is able to use in a model without deterministic batch size.
+    See https://github.com/tensorflow/tensorflow/blob/r1.4/tensorflow/python/ops/rnn.py
+    """
+    while nest.is_sequence(inputs):
+        inputs = inputs[0]
+    return array_ops.shape(inputs)[0]
+
+
 class StepScheduler:
     """ step size scheduler """
 
