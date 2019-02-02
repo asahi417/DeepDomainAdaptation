@@ -16,11 +16,11 @@ setup(
     include_package_data=True,
     test_suite='test',
     install_requires=[
-        'tensorflow-gpu',
-        'scipy',
-        'numpy',
-        'toml',
-        'POT'
+        'tensorflow-gpu>=1.10.1',
+        'scipy>=1.2.0',
+        'numpy>=1.16.0',
+        'toml>=0.10.0',
+        'POT>=0.5.1'
         # 'Pillow'
         # 'pandas',
         # 'nltk',
