@@ -2,7 +2,6 @@
 
 batch=500
 optimizer='adam'
-base_cell='cnn'
 alpha_distance=0.001
 lambda_target_loss=0.0001
 keep_prob=1.0

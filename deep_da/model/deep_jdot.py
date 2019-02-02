@@ -221,6 +221,7 @@ class DeepJDOT:
         # preprocess to get data #
         ##########################
 
+        # onehot vector of label
         self.label_src = tf.cast(label_src, tf.float32)
         self.label_tar = tf.cast(label_tar, tf.float32)
 
@@ -249,13 +250,15 @@ class DeepJDOT:
         # overall network #
         ###################
 
+        out_size = self.__meta_src['label_size']
         self.data_src_ph = tf.placeholder(tf.float32, shape=[None] + src_shape, name='source_data')
-        self.label_src_ph = tf.placeholder(tf.float32, shape=[None], name='source_label')
+        self.label_src_ph = tf.placeholder(tf.float32, shape=[None, out_size], name='onehot_source_label')
 
         self.data_tar_ph = tf.placeholder(tf.float32, shape=[None] + tar_shape, name='data_tar_ph')
-        self.label_tar_ph = tf.placeholder(tf.float32, shape=[None], name='target_label')
+        self.label_tar_ph = tf.placeholder(tf.float32, shape=[None, out_size], name='onehot_target_label')
 
         batch_size = dynamic_batch_size(self.data_src_ph)
+        # batch_size = 200
 
         # universal feature extraction
         with tf.variable_scope('feature_extraction', initializer=initializer):
@@ -275,16 +278,25 @@ class DeepJDOT:
             #    [s_2, t_1], [s_2, t_2], [s_2, t_3]],
             #    [s_3, t_1], [s_3, t_2], [s_3, t_3]]]
             # ]
-            feature_src_tiled = tf.concat(
-                tf.tile(
-                    tf.expand_dims(feature_src, -1),
-                    [1, 1, batch_size]),
-                axis=-1)
+            n_hidden = feature_src.get_shape().as_list()[1]
+            feature_src_tp = tf.transpose(feature_src, [1, 0])
+            feature_src_tp_ex = tf.expand_dims(feature_src_tp, -1)
+            feature_src_tp_ex_tile = tf.tile(feature_src_tp_ex, [1, 1, batch_size])
+            feature_src_tp_ex_tile_flatten = tf.reshape(feature_src_tp_ex_tile, [n_hidden, batch_size*batch_size])
+            feature_src_ex_tile_flatte = tf.transpose(feature_src_tp_ex_tile_flatten, [1, 0])
+            # print(feature_src.get_shape().as_list())
+            # print(feature_src_tp.get_shape().as_list())
+            # print(feature_src_tp_ex.get_shape().as_list())
+            # print(feature_src_tp_ex_tile_flatten.get_shape().as_list())
+
             feature_tar_tiled = tf.tile(feature_tar, [batch_size, 1])
-            diff = feature_tar_tiled - feature_src_tiled
+            # print(feature_tar_tiled.get_shape().as_list())
+            diff = feature_tar_tiled - feature_src_ex_tile_flatte
             ot_cost_matrix = tf.reshape(
                 tf.reduce_sum(diff*diff, axis=1),
                 (batch_size, batch_size))
+
+            # print(diff.get_shape().as_list())
 
         # task-specific model
         with tf.variable_scope('model', initializer=initializer):
@@ -303,25 +315,38 @@ class DeepJDOT:
             #    [l_2, e_1], [l_2, e_2], [l_2, e_3]],
             #    [l_3, e_1], [l_3, e_2], [l_3, e_3]]]
             # ]
-            source_label_tiled = tf.concat(
-                tf.tile(
-                    tf.expand_dims(self.label_src_ph, -1),
-                    [1, 1, batch_size]),
-                axis=-1)
+
+            label_src_tp = tf.transpose(self.label_src_ph, [1, 0])
+            label_src_tp_ex = tf.expand_dims(label_src_tp, -1)
+            label_src_tp_ex_tile = tf.tile(label_src_tp_ex, [1, 1, batch_size])
+            label_src_tp_ex_tile_flatten = tf.reshape(label_src_tp_ex_tile, [out_size, batch_size * batch_size])
+            label_src_ex_tile_flatten = tf.transpose(label_src_tp_ex_tile_flatten, [1, 0])
+            # print(label_src_tp.get_shape().as_list())
+            # print(label_src_ex_tile_flatten.get_shape().as_list())
+
             pred_prob_tar_tiled = tf.tile(pred_prob_tar, [batch_size, 1])
-            prediction_loss = - tf.reduce_mean(source_label_tiled * tf.log(pred_prob_tar_tiled + 1e-6))
+            # print(pred_prob_tar_tiled.get_shape().as_list())
+
             ot_prediction_loss_matrix = tf.reshape(
-                tf.reduce_sum(prediction_loss, axis=1),
+                - tf.reduce_sum(label_src_ex_tile_flatten * tf.log(pred_prob_tar_tiled + 1e-6), axis=1),
                 (batch_size, batch_size))
+            # print(ot_prediction_loss_matrix.get_shape().as_list())
 
             self.cost_matrix = \
                 ot_prediction_loss_matrix * self.__lambda_target_loss + ot_cost_matrix * self.__alpha_distance
 
             # LOSS FOR UPDATE CLASSIFIER
-            self.optimal_transport = tf.placeholder(tf.float32, shape=[None, None], name='optimal_transport')
+            self.optimal_transport = tf.placeholder(tf.float32,
+                                                    # shape=[batch_size, batch_size],
+                                                    shape=[None, None],
+                                                    name='optimal_transport')
             loss_transport = tf.reduce_sum(self.optimal_transport * self.cost_matrix)
-            loss_model_src = - tf.reduce_mean(label_src * tf.log(pred_prob_src + 1e-6))
+            loss_model_src = - tf.reduce_mean(self.label_src_ph * tf.log(pred_prob_src + 1e-6))
             loss_total = loss_model_src + loss_transport
+            # print(loss_model_src.get_shape().as_list())
+            # print(loss_total.get_shape().as_list())
+            # only validation purpose (not used in training model)
+            loss_model_tar = - tf.reduce_mean(self.label_tar_ph * tf.log(pred_prob_tar + 1e-6))
 
         ####################################
         # optimization (update classifier) #
@@ -354,8 +379,6 @@ class DeepJDOT:
                 tf.equal(tf.argmax(label_src, axis=1), tf.argmax(pred_prob_src, axis=1)), tf.float32
             )
         )
-        # only validation purpose (not used in training model)
-        loss_model_tar = - tf.reduce_mean(label_tar * tf.log(pred_prob_tar + 1e-6))
         accuracy_tar = tf.reduce_mean(
             tf.cast(
                 tf.equal(tf.argmax(label_tar, axis=1), tf.argmax(pred_prob_tar, axis=1)), tf.float32
@@ -484,8 +507,22 @@ class DeepJDOT:
                                    feed_dict={self.is_training: False})
                 while True:
                     try:
+                        # Fetch data
+                        data_src, data_tar, label_src, label_tar = self.__session.run(
+                            [self.data_src, self.data_tar, self.label_src, self.label_tar]
+                        )
+
+                        # Validation
                         summary_valid = self.__session.run(self.__summary_valid,
-                                                           feed_dict={self.is_training: False})
+                                                           feed_dict={
+                                                               self.data_src_ph: data_src,
+                                                               self.data_tar_ph: data_tar,
+                                                               self.label_src_ph: label_src,
+                                                               self.label_tar_ph: label_tar,
+                                                               self.is_training: False
+                                                           })
+
+                        # Write tensorboard
                         self.__writer.add_summary(summary_valid, i_summary_valid)  # write tensorboard writer
                         i_summary_valid += 1  # time stamp for tf summary
                     except tf.errors.OutOfRangeError:

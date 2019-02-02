@@ -22,7 +22,7 @@ class Model:
         with tf.variable_scope(scope or "model", reuse=reuse):
             feature = util_tf.full_connected(feature, [n_current, self.__output_size], scope='fc')
             feature = tf.nn.softmax(feature)
-        tf.assert_equal(feature.get_shape()[1], 10)
+        # tf.assert_equal(feature.get_shape()[1], 10)
         return feature
 
 

@@ -35,7 +35,7 @@ class Model:
                     feature = tf.nn.relu(feature)
 
             feature = tf.nn.softmax(feature)
-        tf.assert_equal(feature.get_shape()[1], 10)
+        # tf.assert_equal(feature.get_shape()[1], 10)
         return feature
 
 
@@ -122,6 +122,6 @@ class DomainClassifier:
                 if i != 2:
                     feature = tf.nn.relu(feature)
 
-        tf.assert_equal(feature.get_shape()[1], 1)
+        # tf.assert_equal(feature.get_shape()[1], 1)
         return tf.nn.sigmoid(feature)
 
