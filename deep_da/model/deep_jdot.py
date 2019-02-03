@@ -283,7 +283,7 @@ class DeepJDOT:
             feature_src_tp_ex = tf.expand_dims(feature_src_tp, -1)
             feature_src_tp_ex_tile = tf.tile(feature_src_tp_ex, [1, 1, batch_size])
             feature_src_tp_ex_tile_flatten = tf.reshape(feature_src_tp_ex_tile, [n_hidden, batch_size*batch_size])
-            feature_src_ex_tile_flatte = tf.transpose(feature_src_tp_ex_tile_flatten, [1, 0])
+            feature_src_ex_tile_flatten = tf.transpose(feature_src_tp_ex_tile_flatten, [1, 0])
             # print(feature_src.get_shape().as_list())
             # print(feature_src_tp.get_shape().as_list())
             # print(feature_src_tp_ex.get_shape().as_list())
@@ -291,7 +291,7 @@ class DeepJDOT:
 
             feature_tar_tiled = tf.tile(feature_tar, [batch_size, 1])
             # print(feature_tar_tiled.get_shape().as_list())
-            diff = feature_tar_tiled - feature_src_ex_tile_flatte
+            diff = feature_tar_tiled - feature_src_ex_tile_flatten
             ot_cost_matrix = tf.reshape(
                 tf.reduce_sum(diff*diff, axis=1),
                 (batch_size, batch_size))
@@ -376,12 +376,12 @@ class DeepJDOT:
         # accuracy
         accuracy_src = tf.reduce_mean(
             tf.cast(
-                tf.equal(tf.argmax(label_src, axis=1), tf.argmax(pred_prob_src, axis=1)), tf.float32
+                tf.equal(tf.argmax(self.label_src_ph, axis=1), tf.argmax(pred_prob_src, axis=1)), tf.float32
             )
         )
         accuracy_tar = tf.reduce_mean(
             tf.cast(
-                tf.equal(tf.argmax(label_tar, axis=1), tf.argmax(pred_prob_tar, axis=1)), tf.float32
+                tf.equal(tf.argmax(self.label_tar_ph, axis=1), tf.argmax(pred_prob_tar, axis=1)), tf.float32
             )
         )
 
@@ -395,26 +395,26 @@ class DeepJDOT:
             return tf.expand_dims(tf.expand_dims(tensor, 0), -1)
 
         self.__summary_train = tf.summary.merge([
-            tf.summary.scalar('meta_learning_rate', self.learning_rate),
-            tf.summary.scalar('meta_alpha_distance', self.__alpha_distance),
-            tf.summary.scalar('meta_lambda_target_loss', self.__lambda_target_loss),
-            tf.summary.scalar('meta_keep_prob', __keep_prob),
-            tf.summary.scalar('meta_weight_decay', __weight_decay),
-            tf.summary.image('cost_matrix', weight_to_image(self.cost_matrix), 1),
-            tf.summary.image('optimal_transport', weight_to_image(self.optimal_transport), 1),
-            tf.summary.scalar('eval_train_loss_model_src', loss_model_src),
-            tf.summary.scalar('eval_train_loss_model_tar', loss_model_tar),
-            tf.summary.scalar('eval_train_accuracy_src', accuracy_src),
-            tf.summary.scalar('eval_train_accuracy_tar', accuracy_tar)
+            tf.summary.scalar('train_meta_learning_rate', self.learning_rate),
+            tf.summary.scalar('train_meta_alpha_distance', self.__alpha_distance),
+            tf.summary.scalar('train_meta_lambda_target_loss', self.__lambda_target_loss),
+            tf.summary.scalar('train_meta_keep_prob', __keep_prob),
+            tf.summary.scalar('train_meta_weight_decay', __weight_decay),
+            tf.summary.image('train_stat_cost_matrix', weight_to_image(self.cost_matrix), 1),
+            tf.summary.image('train_stat_optimal_transport', weight_to_image(self.optimal_transport), 1),
+            tf.summary.scalar('train_eval_loss_model_src', loss_model_src),
+            tf.summary.scalar('train_eval_loss_model_tar', loss_model_tar),
+            tf.summary.scalar('train_eval_accuracy_src', accuracy_src),
+            tf.summary.scalar('train_eval_accuracy_tar', accuracy_tar)
         ])
 
         self.__summary_valid = tf.summary.merge([
-            tf.summary.scalar('meta_valid_keep_prob', __keep_prob),
-            tf.summary.scalar('meta_valid__weight_decay', __weight_decay),
-            tf.summary.scalar('eval_valid_loss_model_tar', loss_model_tar),
-            tf.summary.scalar('eval_valid_loss_model_src', loss_model_src),
-            tf.summary.scalar('eval_valid_accuracy_src', accuracy_src),
-            tf.summary.scalar('eval_valid_accuracy_tar', accuracy_tar)
+            tf.summary.scalar('valid_meta_keep_prob', __keep_prob),
+            tf.summary.scalar('valid_meta__weight_decay', __weight_decay),
+            tf.summary.scalar('valid_eval_loss_model_tar', loss_model_tar),
+            tf.summary.scalar('valid_eval_loss_model_src', loss_model_src),
+            tf.summary.scalar('valid_eval_accuracy_src', accuracy_src),
+            tf.summary.scalar('valid_eval_accuracy_tar', accuracy_tar)
         ])
 
         n_var = 0

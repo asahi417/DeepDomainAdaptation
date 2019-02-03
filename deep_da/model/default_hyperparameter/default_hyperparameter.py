@@ -86,9 +86,16 @@ class Parameter:
         self.__parameter['tfrecord_source'] = os.path.join(root_dir, self.__parameter['tfrecord_source'])
         self.__parameter['tfrecord_target'] = os.path.join(root_dir, self.__parameter['tfrecord_target'])
         checkpoint_dir = os.path.join(checkpoint_dir, model_name)
+
         if model_checkpoint_version is None:
+            full_parameter = dict()
+            for k, v in self.__parameter.items():
+                if k in custom_parameter.keys():
+                    full_parameter[k] = custom_parameter[k]
+                else:
+                    full_parameter[k] = v
             self.__checkpoint, self.__custom_parameter = checkpoint_version(
-                checkpoint_dir=checkpoint_dir, config=custom_parameter)
+                checkpoint_dir=checkpoint_dir, config=full_parameter)
         else:
             self.__checkpoint, self.__custom_parameter = checkpoint_version(
                 checkpoint_dir=checkpoint_dir, version=model_checkpoint_version)
@@ -100,14 +107,7 @@ class Parameter:
 
     @property
     def full_parameter(self):
-        """ dictionary of full parameter """
-        tmp = dict()
-        for k, v in self.__parameter.items():
-            if k in self.__custom_parameter.keys():
-                tmp[k] = self.__custom_parameter[k]
-            else:
-                tmp[k] = v
-        return tmp
+        return self.__custom_parameter
 
     def __call__(self, name: str):
         if name not in self.__parameter.keys():

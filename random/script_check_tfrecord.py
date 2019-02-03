@@ -15,9 +15,26 @@ import numpy as np
 import deep_da
 
 
+ROOT_DIR = os.getenv('ROOT_DIR', '.')
+CONFIG = {
+    "mnist": {
+      "train": {
+        "image": os.path.join(ROOT_DIR, "dataset/mnist/train-images-idx3-ubyte.gz"),
+        "label": os.path.join(ROOT_DIR, "dataset/mnist/train-labels-idx1-ubyte.gz")
+      },
+      "valid": {
+        "image": os.path.join(ROOT_DIR, "dataset/mnist/t10k-images-idx3-ubyte.gz"),
+        "label": os.path.join(ROOT_DIR, "dataset/mnist/t10k-labels-idx1-ubyte.gz")
+      }
+    },
+    "svhn": {
+      "train": os.path.join(ROOT_DIR, "dataset/svhn/train_32x32.mat"),
+      "valid": os.path.join(ROOT_DIR, "dataset/svhn/test_32x32.mat")
+    }
+}
+
+
 OUTPUT = os.getenv('OUTPUT', './random/check_tfrecord')
-PATH_TO_CONFIG = os.getenv('PATH_TO_CONFIG', './bin/config.json')
-CONFIG = json.load(open(PATH_TO_CONFIG))
 
 if not os.path.exists(OUTPUT):
     os.makedirs(OUTPUT, exist_ok=True)
@@ -26,7 +43,7 @@ if not os.path.exists(OUTPUT):
 def get_options(parser):
     share_param = {'nargs': '?', 'action': 'store', 'const': None, 'choices': None, 'metavar': None}
     parser.add_argument('-n', '--num', help='number to show', default=5, type=int, **share_param)
-    parser.add_argument('--data', help='dataset name in %s' % CONFIG['RAW_DATA'].keys(), required=True, type=str,
+    parser.add_argument('--data', help='dataset name in %s' % CONFIG.keys(), required=True, type=str,
                         **share_param)
     return parser.parse_args()
 
@@ -39,7 +56,7 @@ class TestTFRecord:
 
         self.__n_thread = n_thread
         self.__path_tfrecord = path
-        self.__read_tf, self.__meta = deep_da.TFRecorder().read_tf(self.__path_tfrecord, is_image=True)
+        self.__read_tf, self.__meta = deep_da.TFRecorder().read_tf(self.__path_tfrecord)
         self.__build_graph()
         self.session = tf.Session(config=tf.ConfigProto(log_device_placement=False))
         self.session.run(tf.global_variables_initializer())
@@ -78,7 +95,7 @@ if __name__ == '__main__':
     args = get_options(
         argparse.ArgumentParser(description='This script is ...', formatter_class=argparse.RawTextHelpFormatter))
 
-    tfrecord_path = '%s/%s' % (CONFIG["TFRECORD_DIR"], args.data)
+    tfrecord_path = os.path.join(ROOT_DIR, 'tfrecord/%s' % args.data)
 
     recorder = TestTFRecord(tfrecord_path)
 
