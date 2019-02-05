@@ -20,9 +20,9 @@ setup(
         'POT>=0.5.1',
         'tensorflow-gpu>=1.10.1',
         'scipy>=1.2.0',
-        'numpy>=1.16.0',
         'toml>=0.10.0',
-        'cython>=0.29.4'
+        'numpy',
+        'cython'
         # 'Pillow'
         # 'pandas',
         # 'nltk',
@@ -31,3 +31,4 @@ setup(
         # 'werkzeug',
     ]
 )
+
