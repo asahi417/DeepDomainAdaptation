@@ -1,35 +1,28 @@
 """ Script to build TFRecord files
 
 python bin/script_tfrecotd.py --data mnist
-
-
-Environment variables:
-
-| Environment variable name | Default | Description         |
-| ------------------------- | ------- | ------------------- |
-| **ROOT_DIR**              | `.`     | root directory      |
-
 """
 
 import argparse
 import os
 import deep_da
 
-ROOT_DIR = os.getenv('ROOT_DIR', '.')
+
+PATH_TO_REPO = '/'.join(os.path.dirname(os.path.abspath(__file__)).split('/')[0:-1])
 CONFIG = {
     "mnist": {
       "train": {
-        "image": os.path.join(ROOT_DIR, "dataset/mnist/train-images-idx3-ubyte.gz"),
-        "label": os.path.join(ROOT_DIR, "dataset/mnist/train-labels-idx1-ubyte.gz")
+        "image": os.path.join(PATH_TO_REPO, "dataset/mnist/train-images-idx3-ubyte.gz"),
+        "label": os.path.join(PATH_TO_REPO, "dataset/mnist/train-labels-idx1-ubyte.gz")
       },
       "valid": {
-        "image": os.path.join(ROOT_DIR, "dataset/mnist/t10k-images-idx3-ubyte.gz"),
-        "label": os.path.join(ROOT_DIR, "dataset/mnist/t10k-labels-idx1-ubyte.gz")
+        "image": os.path.join(PATH_TO_REPO, "dataset/mnist/t10k-images-idx3-ubyte.gz"),
+        "label": os.path.join(PATH_TO_REPO, "dataset/mnist/t10k-labels-idx1-ubyte.gz")
       }
     },
     "svhn": {
-      "train": os.path.join(ROOT_DIR, "dataset/svhn/train_32x32.mat"),
-      "valid": os.path.join(ROOT_DIR, "dataset/svhn/test_32x32.mat")
+      "train": os.path.join(PATH_TO_REPO, "dataset/svhn/train_32x32.mat"),
+      "valid": os.path.join(PATH_TO_REPO, "dataset/svhn/test_32x32.mat")
     }
 }
 
@@ -52,6 +45,6 @@ if __name__ == '__main__':
     recorder = deep_da.TFRecorder()
     recorder.create(
         dataset_name=args.data,
-        dir_to_save=os.path.join(ROOT_DIR, 'tfrecord/%s' % args.data),
+        dir_to_save=os.path.join(PATH_TO_REPO, 'tfrecord/%s' % args.data),
         path_to_data=CONFIG[args.data]
     )

@@ -1,30 +1,19 @@
 """ Script to train model
 
 python bin/script_train.py -m deep_jdot -e 100
-
-
-Environment variables:
-
-| Environment variable name | Default | Description         |
-| ------------------------- | ------- | ------------------- |
-| **ROOT_DIR**              | `.`     | root directory      |
-
 """
 
 import deep_da
 import os
 import argparse
 
-MODEL_LIST = dict(
-    dann=deep_da.model.DANN,
-    deep_jdot=deep_da.model.DeepJDOT
-)
-ROOT_DIR = os.getenv('ROOT_DIR', '.')
+
+PATH_TO_REPO = '/'.join(os.path.dirname(os.path.abspath(__file__)).split('/')[0:-1])
 
 
 def get_options(parser):
     share_param = {'nargs': '?', 'action': 'store', 'const': None, 'choices': None, 'metavar': None}
-    parser.add_argument('-m', '--model', help='Model name in %s' % MODEL_LIST.keys(),
+    parser.add_argument('-m', '--model', help='Model name in %s' % deep_da.MODEL_LIST.keys(),
                         required=True, type=str, **share_param)
     parser.add_argument('-e', '--epoch', help='Epoch',
                         required=True, type=int, **share_param)
@@ -41,9 +30,9 @@ if __name__ == '__main__':
         argparse.ArgumentParser(description='This script is to train models.',
                                 formatter_class=argparse.RawTextHelpFormatter))
 
-    if args.model not in MODEL_LIST.keys():
-        raise ValueError('unknown model: %s not in %s' % (args.model, MODEL_LIST.keys()))
+    if args.model not in deep_da.MODEL_LIST.keys():
+        raise ValueError('unknown model: %s not in %s' % (args.model, deep_da.MODEL_LIST.keys()))
 
-    model_instance = MODEL_LIST[args.model]
-    model = model_instance(root_dir=ROOT_DIR, model_checkpoint_version=args.version)
+    model_instance = deep_da.MODEL_LIST[args.model]
+    model = model_instance(root_dir=PATH_TO_REPO, model_checkpoint_version=args.version)
     model.train(epoch=args.epoch)
