@@ -1,5 +1,11 @@
 import os
 import logging
+from . import model
+
+MODEL_LIST = dict(
+    dann=model.DANN,
+    deep_jdot=model.DeepJDOT
+)
 
 
 def create_log(out_file_path: str=None):

@@ -1,11 +1,20 @@
 # hyperparameter: dann-cnn, svhn -> mnist
 
-batch=500
-optimizer='adam'
-alpha_distance=0.001
-lambda_target_loss=0.0001
+# strong effect of optimal transport regularization
+alpha_distance=0.01
+lambda_target_loss=0.001
+
+# paper's optimal setting
+#alpha_distance=0.001
+#lambda_target_loss=0.0001
+
+# no optimal transport regularization
 #alpha_distance=0.0
 #lambda_target_loss=0.0
+
+# following parameters are generic
+batch=500
+optimizer='adam'
 keep_prob=1.0
 n_thread=4
 weight_decay=0.0

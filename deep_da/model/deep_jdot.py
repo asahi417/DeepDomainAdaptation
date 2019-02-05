@@ -404,6 +404,7 @@ class DeepJDOT:
             tf.summary.image('train_stat_optimal_transport', weight_to_image(self.optimal_transport), 1),
             tf.summary.scalar('train_eval_loss_model_src', loss_model_src),
             tf.summary.scalar('train_eval_loss_model_tar', loss_model_tar),
+            tf.summary.scalar('train_eval_loss_transport', loss_transport),
             tf.summary.scalar('train_eval_accuracy_src', accuracy_src),
             tf.summary.scalar('train_eval_accuracy_tar', accuracy_tar)
         ])
