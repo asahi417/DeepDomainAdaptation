@@ -13,7 +13,7 @@ PATH_TO_REPO = '/'.join(os.path.dirname(os.path.abspath(__file__)).split('/')[0:
 
 def get_options(parser):
     share_param = {'nargs': '?', 'action': 'store', 'const': None, 'choices': None, 'metavar': None}
-    parser.add_argument('-m', '--model', help='Model name in %s' % deep_da.MODEL_LIST.keys(),
+    parser.add_argument('-m', '--model', help='Model name in %s' % deep_da.util.get_model_instance().keys(),
                         required=True, type=str, **share_param)
     parser.add_argument('-e', '--epoch', help='Epoch',
                         required=True, type=int, **share_param)
@@ -30,9 +30,10 @@ if __name__ == '__main__':
         argparse.ArgumentParser(description='This script is to train models.',
                                 formatter_class=argparse.RawTextHelpFormatter))
 
-    if args.model not in deep_da.MODEL_LIST.keys():
-        raise ValueError('unknown model: %s not in %s' % (args.model, deep_da.MODEL_LIST.keys()))
+    list_of_model_name = deep_da.util.get_model_instance().keys()
+    if args.model not in list_of_model_name:
+        raise ValueError('unknown model: %s not in %s' % (args.model, list_of_model_name))
 
-    model_instance = deep_da.MODEL_LIST[args.model]
+    model_instance = deep_da.util.get_model_instance(args.model)
     model = model_instance(root_dir=PATH_TO_REPO, model_checkpoint_version=args.version)
     model.train(epoch=args.epoch)

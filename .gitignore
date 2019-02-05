@@ -16,8 +16,8 @@ dataset/mnist/t10k-images-idx3-ubyte.gz
 dataset/mnist/t10k-labels-idx1-ubyte.gz
 dataset/svhn/train_32x32.mat
 dataset/svhn/test_32x32.mat
-
+dataset/svhn/extra_32x32.mat
 
 checkpoint
 tfrecord
-dataset/svhn/extra_32x32.mat
+
