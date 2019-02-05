@@ -2,10 +2,28 @@ import os
 import logging
 from . import model
 
-MODEL_LIST = dict(
-    dann=model.DANN,
-    deep_jdot=model.DeepJDOT
-)
+
+def get_model_instance(name: str=None):
+    """ Get model instance
+     Parameter
+    ---------------
+    name: str
+        name of algorithm in ['dann', 'deep_jdot']
+
+     Return
+    --------------
+    model_instance
+    """
+
+    model_list = dict(
+        dann=model.DANN,
+        deep_jdot=model.deep_jdot.DeepJDOT
+    )
+
+    if name is None:
+        return model_list
+    else:
+        return model_list[name]
 
 
 def create_log(out_file_path: str=None):
@@ -15,12 +33,13 @@ def create_log(out_file_path: str=None):
 
      Parameter
     ------------------
-    out_file_path: path to output log file
+    out_file_path: str
+        path to output log file
 
      Usage
     -------------------
-    logger.info(message)
-    logger.error(error)
+    >>> logger.info(message)
+    >>> logger.error(error)
     """
 
     # handler to record log to a log file
@@ -69,8 +88,10 @@ def raise_error(condition: bool, msg: str):
 
      Parameter
     -------------
-    condition: if condition is True, raise ValueError
-    msg: manual error message
+    condition: bool
+        if condition is True, raise ValueError
+    msg: str
+        manual error message
     """
     if condition:
         raise ValueError(msg)
@@ -81,7 +102,8 @@ def mkdir(path: str):
 
      Parameter
     -------------
-    path: path to make directory
+    path: str
+        path to make directory
     """
     if not os.path.exists(path):
         os.makedirs(path, exist_ok=True)
