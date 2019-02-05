@@ -42,10 +42,12 @@ def get_options(parser):
 
 if __name__ == '__main__':
     args = get_options(
-        argparse.ArgumentParser(description='This script is ...', formatter_class=argparse.RawTextHelpFormatter))
+        argparse.ArgumentParser(
+            description='This script converts dataset to tfrecord format.',
+            formatter_class=argparse.RawTextHelpFormatter))
 
     if args.data not in CONFIG.keys():
-        raise ValueError('unknown data name: %s not in %s' % (args.data, str(config['RAW_DATA'].keys())))
+        raise ValueError('unknown data name: %s not in %s' % (args.data, str(CONFIG.keys())))
 
     recorder = deep_da.TFRecorder()
     recorder.create(

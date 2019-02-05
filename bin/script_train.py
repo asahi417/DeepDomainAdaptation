@@ -38,7 +38,7 @@ if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     args = get_options(
-        argparse.ArgumentParser(description='Script to train models.',
+        argparse.ArgumentParser(description='This script is to train models.',
                                 formatter_class=argparse.RawTextHelpFormatter))
 
     if args.model not in MODEL_LIST.keys():
