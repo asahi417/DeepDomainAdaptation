@@ -4,7 +4,7 @@
 
 Tensorflow implementation of deep learning based domain adaptation models.
 
-**Work in progress:** Experiment results and algorithm implementation will be appeared soon! 
+**Work in progress:** Experiment results will be appeared soon! 
 
 
 ## Get started
@@ -61,10 +61,7 @@ optional arguments:
     - [implementation](./deep_da/model/dann.py)
 - Deep Joint Distribution Optimal Transport
     - [Damodaran, Bharath Bhushan, et al. "DeepJDOT: Deep Joint distribution optimal transport for unsupervised domain adaptation." arXiv preprint arXiv:1803.10081 (2018).](https://arxiv.org/pdf/1803.10081.pdf)
-    - [implementation](./deep_da/model/deep_jdot.py)
-- Joint Distribution Optimal Transport: 
     - [Nicolas Courty, et al. "Joint distribution optimal transportation for domain adaptation" Advances in Neural Information Processing Systems. 2017.](https://arxiv.org/pdf/1705.08848.pdf)
-    - [implementation](./deep_da/model/jdot.py)
-
+    - [implementation](./deep_da/model/deep_jdot.py)
 
 
