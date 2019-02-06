@@ -2,7 +2,8 @@
 [![dep1](https://img.shields.io/badge/Tensorflow-1.3+-blue.svg)](https://www.tensorflow.org/)
 [![license](https://img.shields.io/badge/License-MIT-brightgreen.svg)](https://github.com/asahi417/WassersteinGAN/blob/master/LICENSE)
 
-Tensorflow implementation of deep learning based domain adaptation models.
+Tensorflow implementation of deep learning based domain adaptation models. 
+See more in [implemented algorithm](https://github.com/asahi417/DeepDomainAdaptation#list-of-models).
 
 **Work in progress:** Experiment results will be appeared soon! 
 
