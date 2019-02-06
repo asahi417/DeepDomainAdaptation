@@ -1,4 +1,4 @@
-# hyperparameter: dann-cnn, svhn -> mnist
+# hyperparameter: deep_jdot, svhn -> mnist
 
 # strong effect of optimal transport regularization
 alpha_distance=0.01

@@ -179,20 +179,7 @@ class DeepJDOT:
         return iterator, iterator_ini
 
     def __build_graph(self):
-        """ build tensorflow graph
-
-        G_f : feature extractor
-        G_dc: domain classifier
-        G_m : main task-specific model
-
-        (x_t, y_t) ~ target
-        (x_s, y_s) ~ source
-
-        loss = L_main{ G_m(G_f(x_s)), y_s } - r_dc * L_da{ G_m(G_f(x_s)), G_m(G_f(x_t)) | r_fe }
-
-        * Note: r_dc is regularization term for domain classification, and r_fe is coefficient to scale amount of
-                propagation by feature extractor
-        """
+        """ build tensorflow graph """
 
         ##################
         # initialization #

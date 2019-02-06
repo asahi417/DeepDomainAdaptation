@@ -1,21 +1,24 @@
-# hyperparameter: dann-cnn, svhn -> mnist
+# hyperparameter: dann, svhn -> mnist
 
 batch=500
 optimizer='adam'
-weight_decay=1e-8
-is_image=true
+weight_decay=0.0
+keep_prob=1.0
+n_thread=4
+initializer='variance_scaling'
 base_cell='cnn'
-#keep_prob=0.8
+tfrecord_source='tfrecord/svhn'
+tfrecord_target='tfrecord/mnist'
 
-[learning_rate_config]
+[config_learning_rate]
 identity=true
 initial_step=0.0002
 
-[regularizer_config_domain_classification]
+[config_regularizer_domain_classifier]
 identity=true
 initial_step=1.0
 
-[regularizer_config_feature_extraction]
+[config_regularizer_feature_extractor]
 exponential=true
 multiplier=0.0004
 
@@ -28,5 +31,5 @@ fc_n_hidden=128
 [config_domain_classifier]
 output_size=1
 
-[config_model]
+[config_classifier]
 output_size=10
