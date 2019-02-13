@@ -17,6 +17,7 @@ initial_step=0.0002
 [config_regularizer_domain_classifier]
 identity=true
 initial_step=1.0
+#initial_step=0.0
 
 [config_regularizer_feature_extractor]
 exponential=true
