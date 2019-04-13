@@ -92,10 +92,12 @@ class DeepJDOT:
         self.__read_tf_tar, self.__meta_tar = TFR.read_tf(dir_to_tfrecord=self.__tfrecord_target)
         self.__tfrecord_path = dict(
             source=dict(
-                train=os.path.join(self.__tfrecord_source, 'train.tfrecord'),
-                valid=os.path.join(self.__tfrecord_source, 'valid.tfrecord')
+                train=[os.path.join(self.__tfrecord_source, 'train_%i.tfrecord' % i) for i in range(10)],
+                valid=[os.path.join(self.__tfrecord_source, 'valid_%i.tfrecord' % i) for i in range(10)]
             ),
             target=dict(
+                # train=[os.path.join(self.__tfrecord_source, 'train_%i.tfrecord' % i) for i in range(10)],
+                # valid=[os.path.join(self.__tfrecord_source, 'valid_%i.tfrecord' % i) for i in range(10)]
                 train=os.path.join(self.__tfrecord_target, 'train.tfrecord'),
                 valid=os.path.join(self.__tfrecord_target, 'valid.tfrecord')
             )
@@ -157,26 +159,41 @@ class DeepJDOT:
         iterator, initializer
         """
 
-        if is_source:
-            tf_reader = self.__read_tf_src
-            tfrecord = self.__tfrecord_path['source']
-        else:
-            tf_reader = self.__read_tf_tar
-            tfrecord = self.__tfrecord_path['target']
+        def __tfrecord_single(tf_reader,
+                              tfrecord_name_train,
+                              tfrecord_name_valid,
+                              batch_size):
+            # tfrecord_name = tf.where(is_training, tfrecord['train'], tfrecord['valid'])
+            tfrecord_name = tf.where(is_training,
+                                     tfrecord_name_train,
+                                     tfrecord_name_valid)
 
-        tfrecord_name = tf.where(is_training, tfrecord['train'], tfrecord['valid'])
-        data_set_api = tf.data.TFRecordDataset(tfrecord_name, compression_type='GZIP')
-        # convert record to tensor
-        data_set_api = data_set_api.map(tf_reader, self.__n_thread)
-        # set buffer size
-        # buffer_size = tf.where(is_training, 10000 if is_source else 60000, 1000)
-        buffer_size = 5000
-        data_set_api = data_set_api.shuffle(buffer_size=tf.cast(buffer_size, tf.int64))
-        data_set_api = data_set_api.batch(tf.cast(batch, tf.int64))
-        # make iterator
-        iterator = tf.data.Iterator.from_structure(data_set_api.output_types, data_set_api.output_shapes)
-        iterator_ini = iterator.make_initializer(data_set_api)
-        return iterator, iterator_ini
+            data_set_api = tf.data.TFRecordDataset(tfrecord_name, compression_type='GZIP')
+            # convert record to tensor
+            data_set_api = data_set_api.map(tf_reader, self.__n_thread)
+            # set buffer size
+            # buffer_size = tf.where(is_training, 10000 if is_source else 60000, 1000)
+            buffer_size = 5000
+            data_set_api = data_set_api.shuffle(buffer_size=tf.cast(buffer_size, tf.int64))
+            data_set_api = data_set_api.batch(tf.cast(batch_size, tf.int64))
+            # make iterator
+            iterator = tf.data.Iterator.from_structure(data_set_api.output_types, data_set_api.output_shapes)
+            iterator_ini = iterator.make_initializer(data_set_api)
+            return iterator, iterator_ini
+
+        if is_source:
+            _tf_reader = self.__read_tf_src
+            _tfrecord = self.__tfrecord_path['source']
+            _tfrecord_name_train, _tfrecord_name_valid = _tfrecord['train'], _tfrecord['valid']
+            _batch = int(batch/self.__meta_src['label_size'])
+            list_of_iterator = [__tfrecord_single(_tf_reader, _tr, _vl, _batch)
+                                for _tr, _vl in zip(_tfrecord_name_train, _tfrecord_name_valid)]
+            return list_of_iterator
+        else:
+            _tf_reader = self.__read_tf_tar
+            _tfrecord = self.__tfrecord_path['target']
+            _iterator, _iterator_ini = __tfrecord_single(_tf_reader, _tfrecord['train'], _tfrecord['valid'], batch)
+            return _iterator, _iterator_ini
 
     def __build_graph(self):
         """ build tensorflow graph """
@@ -193,16 +210,29 @@ class DeepJDOT:
 
         self.learning_rate = tf.placeholder_with_default(0.0, [], name='learning_rate')
         self.is_training = tf.placeholder_with_default(False, [])
+
         __keep_prob = tf.where(self.is_training, self.__keep_prob, 1.0)
         __weight_decay = tf.where(self.is_training, self.__weight_decay, 0.0)
 
-        # TFRecord
-        iterator_src, self.__iterator_ini_src = self.__tfrecord(self.__batch, self.is_training, is_source=True)
-        iterator_tar, self.__iterator_ini_tar = self.__tfrecord(self.__batch, self.is_training, is_source=False)
+        # TFRecord: get next input (label is one hot vector)
+        source_tfrecords = self.__tfrecord(self.__batch, self.is_training, is_source=True)
+        list_iterator_src = [t[0] for t in source_tfrecords]
+        iterator_ini_src = [t[1] for t in source_tfrecords]
+        image_src, label_src = [], []
+        for iterator_src in list_iterator_src:
+            _image_src, _label_src = iterator_src.get_next()
+            image_src.append(_image_src)
+            label_src.append(_label_src)
 
-        # get next input (label is one hot vector)
-        image_src, label_src = iterator_src.get_next()
+        image_src = tf.concat(image_src, axis=0)
+        # print(image_src.shape)
+
+        label_src = tf.concat(label_src, axis=0)
+        # print(label_src.shape)
+
+        iterator_tar, iterator_ini_tar = self.__tfrecord(self.__batch, self.is_training, is_source=False)
         image_tar, label_tar = iterator_tar.get_next()
+        self.__iterator_ini = iterator_ini_src + [iterator_ini_tar]
 
         ##########################
         # preprocess to get data #
@@ -448,14 +478,17 @@ class DeepJDOT:
                 self.__logger.info('epoch %i/%i' % (e, ini_epoch+epoch))
 
                 self.__logger.info(' - training')
-                self.__session.run([self.__iterator_ini_src, self.__iterator_ini_tar],
-                                   feed_dict={self.is_training: True})
+                # self.__iterator_ini_src is list of initializer corresponding to each label
+                self.__session.run(self.__iterator_ini, feed_dict={self.is_training: True})
                 while True:
                     try:
                         # Fetch data
                         data_src, data_tar, label_src, label_tar = self.__session.run(
                             [self.data_src, self.data_tar, self.label_src, self.label_tar]
                         )
+
+                        if data_src.shape != data_tar.shape:
+                            break
 
                         # Update optimal transport (fix classifier)
                         cost_matrix = self.__session.run(
@@ -491,8 +524,8 @@ class DeepJDOT:
                         break
 
                 self.__logger.info(' - validation')
-                self.__session.run([self.__iterator_ini_src, self.__iterator_ini_tar],
-                                   feed_dict={self.is_training: False})
+                # self.__iterator_ini_src is list of initializer corresponding to each label
+                self.__session.run(self.__iterator_ini, feed_dict={self.is_training: False})
                 while True:
                     try:
                         # Fetch data

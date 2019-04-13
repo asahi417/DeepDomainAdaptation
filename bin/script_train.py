@@ -11,7 +11,9 @@ import argparse
 PATH_TO_REPO = '/'.join(os.path.dirname(os.path.abspath(__file__)).split('/')[0:-1])
 
 
-def get_options(parser):
+def get_options():
+    parser = argparse.ArgumentParser(description='Train model.',
+                                     formatter_class=argparse.RawTextHelpFormatter)
     share_param = {'nargs': '?', 'action': 'store', 'const': None, 'choices': None, 'metavar': None}
     parser.add_argument('-m', '--model', help='Model name in %s' % deep_da.util.get_model_instance().keys(),
                         required=True, type=str, **share_param)
@@ -26,9 +28,7 @@ if __name__ == '__main__':
     # Ignore warning message by tensor flow
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
-    args = get_options(
-        argparse.ArgumentParser(description='This script is to train models.',
-                                formatter_class=argparse.RawTextHelpFormatter))
+    args = get_options()
 
     list_of_model_name = deep_da.util.get_model_instance().keys()
     if args.model not in list_of_model_name:

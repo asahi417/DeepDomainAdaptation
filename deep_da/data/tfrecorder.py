@@ -27,8 +27,6 @@ class TFRecorder:
     >>> recorder = deep_da.TFRecorder()
     >>> recorder.create('mnist', dir_to_save='./', path_to_data=dict('path_to_mnist'))
 
-    - load in Tensorflow graph
-    TBA
     """
 
     def __init__(self):
@@ -63,26 +61,30 @@ class TFRecorder:
 
         for data_type in data_iterator.types:
             time_stamp_start = time()
-            path = '%s/%s.tfrecord' % (dir_to_save, data_type)
             compress_opt = tf.python_io.TFRecordOptions(tf.python_io.TFRecordCompressionType.GZIP)
 
             # set iterator type
             data_iterator.set_data_type(data_type)
+            for data_label in [None] + data_iterator.data_label:
+                data_iterator.set_data_label(data_label)
+                data_label = '' if data_label is None else '_%i' % data_label
+                path = '%s/%s%s.tfrecord' % (dir_to_save, data_type, data_label)
 
-            with tf.python_io.TFRecordWriter(path, options=compress_opt) as writer:
-                self.__logger.info(' - process %s (total size: %i)' % (data_type, data_iterator.data_size))
+                with tf.python_io.TFRecordWriter(path, options=compress_opt) as writer:
+                    self.__logger.info(' - process %s with label %s (total size: %i)'
+                                       % (data_type, data_label, data_iterator.data_size))
 
-                for n, data in enumerate(data_iterator):
-                    feature = dict(data=byte_feature(data['data']), label=byte_feature(data['label']))
-                    ex = tf.train.Example(features=tf.train.Features(feature=feature))
-                    writer.write(ex.SerializeToString())
+                    for n, data in enumerate(data_iterator):
+                        feature = dict(data=byte_feature(data['data']), label=byte_feature(data['label']))
+                        ex = tf.train.Example(features=tf.train.Features(feature=feature))
+                        writer.write(ex.SerializeToString())
 
-                    # output progress
-                    if n % progress_interval == 0:
-                        progress_perc = n / data_iterator.data_size * 100
-                        whole_time = time() - time_stamp_start
-                        print('%d / %d (%0.1f %%), (%0.1f sec) \r'
-                              % (n, data_iterator.data_size, progress_perc, whole_time), end='', flush=True)
+                        # output progress
+                        if n % progress_interval == 0:
+                            progress_perc = n / data_iterator.data_size * 100
+                            whole_time = time() - time_stamp_start
+                            print('%d / %d (%0.1f %%), (%0.1f sec) \r'
+                                  % (n, data_iterator.data_size, progress_perc, whole_time), end='', flush=True)
 
         self.__logger.info(' - closing iterator')
         data_iterator.close(dir_to_save)

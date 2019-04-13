@@ -21,3 +21,4 @@ dataset/svhn/extra_32x32.mat
 checkpoint
 tfrecord
 
+.pyenv

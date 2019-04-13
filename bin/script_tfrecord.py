@@ -27,17 +27,16 @@ CONFIG = {
 }
 
 
-def get_options(parser):
+def get_options():
+    parser = argparse.ArgumentParser(description='Convert data to tfrecord format.',
+                                     formatter_class=argparse.RawTextHelpFormatter)
     share_param = {'nargs': '?', 'action': 'store', 'const': None, 'choices': None, 'metavar': None}
     parser.add_argument('--data', help='dataset name in %s' % CONFIG.keys(), required=True, type=str, **share_param)
     return parser.parse_args()
 
 
 if __name__ == '__main__':
-    args = get_options(
-        argparse.ArgumentParser(
-            description='This script converts dataset to tfrecord format.',
-            formatter_class=argparse.RawTextHelpFormatter))
+    args = get_options()
 
     if args.data not in CONFIG.keys():
         raise ValueError('unknown data name: %s not in %s' % (args.data, str(CONFIG.keys())))

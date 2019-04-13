@@ -28,6 +28,7 @@ class MNIST:
         self.__lookup_label = dict([(i, i) for i in range(10)])
         self.types = ['train', 'valid']
         self.__data_type = None
+        self.__data_label = None
 
     @staticmethod
     def image(filename, num_images):
@@ -40,6 +41,10 @@ class MNIST:
             data = np.frombuffer(buf, dtype=np.uint8)
             data = data.reshape(num_images, 28, 28, 1)
             return data
+
+    @property
+    def data_label(self):
+        return list(self.__lookup_label.keys())
 
     @staticmethod
     def label(filename, num_images):
@@ -57,6 +62,11 @@ class MNIST:
     def set_data_type(self, data_type: str):
         self.__data_type = data_type
 
+    def set_data_label(self, data_label: int):
+        if data_label is not None and data_label not in self.__lookup_label.keys():
+            raise ValueError('unknown label %i' % data_label)
+        self.__data_label = data_label
+
     def __iter__(self):
         if self.__data_type is None or self.__data_type not in ['train', 'valid']:
             raise ValueError('set data type by `set_data_type`')
@@ -64,16 +74,24 @@ class MNIST:
         return self
 
     def __next__(self):
-        if self.__ind >= self.__data_size[self.__data_type]:
-            raise StopIteration
-        label = np.zeros(len(self.__lookup_label))
-        label[self.__lookup_label[self.__data[self.__data_type]['label'][self.__ind]]] = 1
-        img = self.__data[self.__data_type]['data'][self.__ind]
-        result = dict(
-            data=img.astype(np.int32),
-            label=label.astype(np.int32)
-        )
-        self.__ind += 1
+        while True:
+            if self.__ind >= self.__data_size[self.__data_type]:
+                raise StopIteration
+            label = np.zeros(len(self.__lookup_label))
+            label_id = self.__data[self.__data_type]['label'][self.__ind]
+            if self.__data_label is None or self.__data_label == label_id:
+                # one hot
+                label[self.__lookup_label[label_id]] = 1
+                img = self.__data[self.__data_type]['data'][self.__ind]
+                result = dict(
+                    data=img.astype(np.int32),
+                    label=label.astype(np.int32)
+                )
+                self.__ind += 1
+                break
+            else:
+                self.__ind += 1
+
         return result
 
     def close(self, dir_to_save):

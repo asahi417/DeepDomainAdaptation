@@ -22,6 +22,7 @@ class SVHN:
         self.__lookup_label = dict([(i, i) for i in range(10)])
         self.types = ['train', 'valid']
         self.__data_type = None
+        self.__data_label = None
 
     @staticmethod
     def image(filename):
@@ -35,11 +36,20 @@ class SVHN:
         )
 
     @property
+    def data_label(self):
+        return list(self.__lookup_label.keys())
+
+    @property
     def data_size(self):
         return self.__data_size[self.__data_type]
 
     def set_data_type(self, data_type: str):
         self.__data_type = data_type
+
+    def set_data_label(self, data_label):
+        if data_label is not None and data_label not in self.__lookup_label.keys():
+            raise ValueError('unknown label %i' % data_label)
+        self.__data_label = data_label
 
     def __iter__(self):
         if self.__data_type is None or self.__data_type not in ['train', 'valid']:
@@ -48,24 +58,27 @@ class SVHN:
         return self
 
     def __next__(self):
-        if self.__ind >= self.__data_size[self.__data_type]:
-            raise StopIteration
+        while True:
+            if self.__ind >= self.__data_size[self.__data_type]:
+                raise StopIteration
+            label = np.zeros(len(self.__lookup_label))
+            # raw data has index, in which digit `0` is indexed as 10 (other digits follow their number
+            # eg `1`: 1, `2`: 2,..., `9`:9). So convert it to be `0` is indexed as 0.
+            label_id = self.__data[self.__data_type]['label'][self.__ind]
+            label_id = 0 if label_id == 10 else label_id
+            if self.__data_label is None or self.__data_label == label_id:
+                # one hot
+                label[self.__lookup_label[label_id]] = 1
+                img = self.__data[self.__data_type]['data'][self.__ind]
+                result = dict(
+                    data=img.astype(np.int32),
+                    label=label.astype(np.int32)
+                )
+                self.__ind += 1
+                break
+            else:
+                self.__ind += 1
 
-        # raw data has index, in which digit `0` is indexed as 10 (other digits follow their number
-        # eg `1`: 1, `2`: 2,..., `9`:9). So convert it to be `0` is indexed as 0.
-        label_index = self.__data[self.__data_type]['label'][self.__ind]
-        label_index = 0 if label_index == 10 else label_index
-
-        # one hot
-        label = np.zeros(len(self.__lookup_label))
-        label[self.__lookup_label[label_index]] = 1
-
-        img = self.__data[self.__data_type]['data'][self.__ind]
-        result = dict(
-            data=img.astype(np.int32),
-            label=label.astype(np.int32)
-        )
-        self.__ind += 1
         return result
 
     def close(self, dir_to_save):
