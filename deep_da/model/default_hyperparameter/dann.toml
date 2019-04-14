@@ -1,13 +1,11 @@
 # default hyperparameter
 
-learning_rate=0.00005
-batch=10
+learning_rate=0.001
+batch=4
 optimizer='adam'
 weight_decay=0.0
 keep_prob=1.0
 initializer='variance_scaling'
 target_source='mnist_svhn'
 
-[config_regularizer_feature_extractor]
-exponential=true
-multiplier=0.0004
+regularizer_scheduler_bias=-1

@@ -16,8 +16,6 @@ def get_options():
                         required=True, type=str, **share_param)
     parser.add_argument('-e', '--epoch', help='Epoch',
                         required=True, type=int, **share_param)
-    parser.add_argument('-v', '--version', help='Checkpoint version if train from existing checkpoint',
-                        default=None, type=int, **share_param)
     parser.add_argument('--root_dir', help='Root directory to store checkpoint and data',
                         default=None, type=str, **share_param)
     return parser.parse_args()
@@ -29,5 +27,5 @@ if __name__ == '__main__':
 
     args = get_options()
     model_instance = deep_da.util.get_model_instance(args.model)
-    model = model_instance(model_checkpoint_version=args.version, root_dir=args.root_dir)
+    model = model_instance(root_dir=args.root_dir)
     model.train(epoch=args.epoch)

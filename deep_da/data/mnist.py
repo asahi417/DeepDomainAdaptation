@@ -42,6 +42,8 @@ class MNIST:
         self.__unique_label_size = len(unique_label)
         self.__training_data = dict([(i, data[label == i]) for i in unique_label])
         self.__training_data_count = dict([(i, len(data[label == i])) for i in unique_label])
+        self.batch_num = int(np.min(list(self.__training_data_count.values())) / batch)
+
         # validation data
         self.__validation_data = dict(image=self.image(os.path.join(self.__root_dir, CONFIG['valid']['image']), 10000),
                                       label=self.label(os.path.join(self.__root_dir, CONFIG['valid']['label']), 10000))

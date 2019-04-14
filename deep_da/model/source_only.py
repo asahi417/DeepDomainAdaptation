@@ -15,18 +15,13 @@ class SourceOnly:
     """ Source only domain adaptation model """
 
     def __init__(self,
-                 model_checkpoint_version: int = None,
                  root_dir: str = None,
                  **kwargs):
 
         # setting  hyper parameters
         root_dir = root_dir if root_dir is not None else DEFAULT_ROOD_DIR
         checkpoint_dir = os.path.join(root_dir, 'checkpoint')
-        if model_checkpoint_version is None:
-            param_instance = Parameter('source_only', checkpoint_dir=checkpoint_dir, custom_parameter=kwargs)
-        else:
-            param_instance = Parameter(
-                'source_only', checkpoint_dir=checkpoint_dir, model_checkpoint_version=model_checkpoint_version)
+        param_instance = Parameter('source_only', checkpoint_dir=checkpoint_dir, custom_parameter=kwargs)
         self.__learning_rate = param_instance('learning_rate')
         self.__batch = param_instance('batch')
         self.__optimizer = param_instance('optimizer')
@@ -59,13 +54,7 @@ class SourceOnly:
         self.__writer = tf.summary.FileWriter('%s/summary' % self.__checkpoint_path, self.__session.graph)
 
         # load model
-        if os.path.exists(os.path.join(self.__checkpoint_path, 'model.ckpt.meta')):
-            self.__logger.info('load model from %s' % self.__checkpoint_path)
-            self.__saver.restore(self.__session, os.path.join(self.__checkpoint_path, 'model.ckpt'))
-            self.__warm_start = True
-        else:
-            self.__session.run(tf.global_variables_initializer())
-            self.__warm_start = False
+        self.__session.run(tf.global_variables_initializer())
 
     @staticmethod
     def __feature_extractor(image,
@@ -87,11 +76,11 @@ class SourceOnly:
                 image = tf.nn.relu(image)
                 if keep_prob is not None and n == 1:  # put dropout only second layer
                     image = tf.nn.dropout(image, keep_prob=keep_prob)
-                if n == layer_n - 1:  # don't put max pool on last layer
+                if n != layer_n - 1:  # don't put max pool on last layer
                     image = tf.nn.max_pool(
                         image, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
-            fature = tf.reshape(image, shape=[-1, np.prod(image.get_shape().as_list()[1:])])
-            return fature
+            feature = tf.reshape(image, shape=[-1, np.prod(image.get_shape().as_list()[1:])])
+            return feature
 
     @staticmethod
     def __classifier(feature,
@@ -150,7 +139,7 @@ class SourceOnly:
         source_image = tf.image.per_image_standardization(source_image)
 
         # shared feature extraction
-        with tf.variable_scope('shared_feature_extraction', initializer=initializer):
+        with tf.variable_scope('feature_extraction', initializer=initializer):
             source_feature = self.__feature_extractor(source_image, keep_prob=__keep_prob)
             target_feature = self.__feature_extractor(target_image, keep_prob=__keep_prob, reuse=True)
 
@@ -177,42 +166,44 @@ class SourceOnly:
             loss_domain = tf.reduce_mean([loss_source_domain, loss_target_domain])
 
         # optimization
-        total_loss = loss_source + loss_domain
-        optimizer = util_tf.get_optimizer(self.__optimizer, self.__learning_rate)
-        trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
+        with tf.variable_scope('loss'):
+            total_loss = loss_source + loss_domain
+            optimizer = util_tf.get_optimizer(self.__optimizer, self.__learning_rate)
+            trainable_variables = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES)
 
-        # L2 weight decay
-        if __weight_decay != 0.0:
-            total_loss += __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in trainable_variables])
+            # L2 weight decay
+            if __weight_decay != 0.0:
+                total_loss += __weight_decay * tf.add_n([tf.nn.l2_loss(v) for v in trainable_variables])
 
-        gradient = tf.gradients(total_loss, trainable_variables)
-        self.__train_op = optimizer.apply_gradients(zip(gradient, trainable_variables))
+            gradient = tf.gradients(total_loss, trainable_variables)
+            self.__train_op = optimizer.apply_gradients(zip(gradient, trainable_variables))
 
         # accuracy
-        self.__accuracy_source = tf.reduce_mean(
-            tf.cast(
-                tf.equal(tf.argmax(self.source_label, axis=1), tf.argmax(source_prob, axis=1)),
-                tf.float32))
-        self.__accuracy_target = tf.reduce_mean(
-            tf.cast(
-                tf.equal(tf.argmax(self.target_label, axis=1), tf.argmax(target_prob, axis=1)),
-                tf.float32))
+        with tf.variable_scope('accuracy'):
+            self.__accuracy_source = tf.reduce_mean(
+                tf.cast(
+                    tf.equal(tf.argmax(self.source_label, axis=1), tf.argmax(source_prob, axis=1)),
+                    tf.float32))
+            self.__accuracy_target = tf.reduce_mean(
+                tf.cast(
+                    tf.equal(tf.argmax(self.target_label, axis=1), tf.argmax(target_prob, axis=1)),
+                    tf.float32))
 
-        domain_accuracy_target = tf.reduce_mean(
-            tf.cast(
-                tf.equal(tf.cast(
-                    tf.logical_not(tf.less(source_domain_prob, 0.5)),
-                    tf.float32),
-                    1.0),
-                tf.float32))
-        domain_accuracy_source = tf.reduce_mean(
-            tf.cast(
-                tf.equal(tf.cast(
-                    tf.less(target_domain_prob, 0.5),
-                    tf.float32),
-                    1.0),
-                tf.float32))
-        accuracy_domain = tf.reduce_mean([domain_accuracy_target, domain_accuracy_source])
+            domain_accuracy_target = tf.reduce_mean(
+                tf.cast(
+                    tf.equal(tf.cast(
+                        tf.logical_not(tf.less(source_domain_prob, 0.5)),
+                        tf.float32),
+                        1.0),
+                    tf.float32))
+            domain_accuracy_source = tf.reduce_mean(
+                tf.cast(
+                    tf.equal(tf.cast(
+                        tf.less(target_domain_prob, 0.5),
+                        tf.float32),
+                        1.0),
+                    tf.float32))
+            accuracy_domain = tf.reduce_mean([domain_accuracy_target, domain_accuracy_source])
 
         # saver
         self.__saver = tf.train.Saver()
@@ -252,21 +243,10 @@ class SourceOnly:
         self.__logger.info('total variables: %i' % n_var)
 
     def train(self, epoch: int):
-
+        ini_epoch, i_summary_train, i_summary_valid, i_summary_train_var = 0, 0, 0, 0
         logger = create_log(os.path.join(self.__checkpoint_path, 'log_train.log'))
-
-        if self.__warm_start:
-            meta = np.load(os.path.join(self.__checkpoint_path, 'meta.npz'))
-            i_summary_train = int(meta['i_summary_train'])
-            i_summary_valid = int(meta['i_summary_valid'])
-            i_summary_train_var = int(meta['i_summary_train_var'])
-            ini_epoch = int(meta['epoch'])
-        else:
-            ini_epoch, i_summary_train, i_summary_valid, i_summary_train_var = 0, 0, 0, 0
-
         logger.info('checkpoint (%s), epoch (%i)' % (self.__checkpoint_path, epoch))
         logger.info('- accuracy: source_train - target_train - source_valid - source_valid')
-        e = -1
         try:
             for e in range(ini_epoch, ini_epoch + epoch):
 
@@ -344,12 +324,6 @@ class SourceOnly:
 
         logger.info('Save checkpoints......')
         self.__saver.save(self.__session, os.path.join(self.__checkpoint_path, 'model.ckpt'))
-
-        np.savez(os.path.join(self.__checkpoint_path, 'meta.npz'),
-                 epoch=e + 1,
-                 i_summary_train=i_summary_train,
-                 i_summary_valid=i_summary_valid,
-                 i_summary_train_var=i_summary_train_var)
 
 
 
