@@ -8,9 +8,6 @@ import os
 import argparse
 
 
-PATH_TO_REPO = '/'.join(os.path.dirname(os.path.abspath(__file__)).split('/')[0:-1])
-
-
 def get_options():
     parser = argparse.ArgumentParser(description='Train model.',
                                      formatter_class=argparse.RawTextHelpFormatter)
@@ -21,6 +18,8 @@ def get_options():
                         required=True, type=int, **share_param)
     parser.add_argument('-v', '--version', help='Checkpoint version if train from existing checkpoint',
                         default=None, type=int, **share_param)
+    parser.add_argument('--root_dir', help='Root directory to store checkpoint and data',
+                        default=None, type=str, **share_param)
     return parser.parse_args()
 
 
@@ -29,11 +28,6 @@ if __name__ == '__main__':
     os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 
     args = get_options()
-
-    list_of_model_name = deep_da.util.get_model_instance().keys()
-    if args.model not in list_of_model_name:
-        raise ValueError('unknown model: %s not in %s' % (args.model, list_of_model_name))
-
     model_instance = deep_da.util.get_model_instance(args.model)
-    model = model_instance(root_dir=PATH_TO_REPO, model_checkpoint_version=args.version)
+    model = model_instance(model_checkpoint_version=args.version, root_dir=args.root_dir)
     model.train(epoch=args.epoch)

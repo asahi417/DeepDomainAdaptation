@@ -16,22 +16,6 @@ import deep_da
 
 
 ROOT_DIR = os.getenv('ROOT_DIR', '.')
-CONFIG = {
-    "mnist": {
-      "train": {
-        "image": os.path.join(ROOT_DIR, "dataset/mnist/train-images-idx3-ubyte.gz"),
-        "label": os.path.join(ROOT_DIR, "dataset/mnist/train-labels-idx1-ubyte.gz")
-      },
-      "valid": {
-        "image": os.path.join(ROOT_DIR, "dataset/mnist/t10k-images-idx3-ubyte.gz"),
-        "label": os.path.join(ROOT_DIR, "dataset/mnist/t10k-labels-idx1-ubyte.gz")
-      }
-    },
-    "svhn": {
-      "train": os.path.join(ROOT_DIR, "dataset/svhn/train_32x32.mat"),
-      "valid": os.path.join(ROOT_DIR, "dataset/svhn/test_32x32.mat")
-    }
-}
 
 
 OUTPUT = os.getenv('OUTPUT', './random/check_tfrecord')
@@ -40,10 +24,12 @@ if not os.path.exists(OUTPUT):
     os.makedirs(OUTPUT, exist_ok=True)
 
 
-def get_options(parser):
+def get_options():
+    parser = argparse.ArgumentParser(description='check tfrecord',
+                                     formatter_class=argparse.RawTextHelpFormatter)
     share_param = {'nargs': '?', 'action': 'store', 'const': None, 'choices': None, 'metavar': None}
     parser.add_argument('-n', '--num', help='number to show', default=5, type=int, **share_param)
-    parser.add_argument('--data', help='dataset name in %s' % CONFIG.keys(), required=True, type=str,
+    parser.add_argument('--data', help='dataset name', required=True, type=str,
                         **share_param)
     return parser.parse_args()
 
@@ -92,8 +78,7 @@ class TestTFRecord:
 
 
 if __name__ == '__main__':
-    args = get_options(
-        argparse.ArgumentParser(description='This script is ...', formatter_class=argparse.RawTextHelpFormatter))
+    args = get_options()
 
     tfrecord_path = os.path.join(ROOT_DIR, 'tfrecord/%s' % args.data)
 

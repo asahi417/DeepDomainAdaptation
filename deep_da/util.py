@@ -17,7 +17,8 @@ def get_model_instance(name: str=None):
 
     model_list = dict(
         dann=model.DANN,
-        deep_jdot=model.deep_jdot.DeepJDOT
+        source_only=model.SourceOnly
+        # deep_jdot=model.deep_jdot.DeepJDOT
     )
 
     if name is None:
@@ -82,28 +83,3 @@ def create_log(out_file_path: str=None):
             logger.addHandler(handler)
             return logger
 
-
-def raise_error(condition: bool, msg: str):
-    """ function to raise ValueError error
-
-     Parameter
-    -------------
-    condition: bool
-        if condition is True, raise ValueError
-    msg: str
-        manual error message
-    """
-    if condition:
-        raise ValueError(msg)
-
-
-def mkdir(path: str):
-    """ mkdir command
-
-     Parameter
-    -------------
-    path: str
-        path to make directory
-    """
-    if not os.path.exists(path):
-        os.makedirs(path, exist_ok=True)

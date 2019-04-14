@@ -1,3 +1,4 @@
+from . import data
 from . import model
-from .data.tfrecorder import TFRecorder
+# from .data.tfrecorder import TFRecorder
 from . import util

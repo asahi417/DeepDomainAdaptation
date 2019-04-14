@@ -1,1 +1,2 @@
-from .tfrecorder import TFRecorder
+from .svhn import SVHN
+from .mnist import MNIST

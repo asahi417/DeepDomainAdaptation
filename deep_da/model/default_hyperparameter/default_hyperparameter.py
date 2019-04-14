@@ -75,7 +75,6 @@ class Parameter:
     def __init__(self,
                  model_name: str,
                  checkpoint_dir: str,
-                 root_dir: str='.',
                  custom_parameter: dict=None,
                  model_checkpoint_version: int=None):
 
@@ -83,8 +82,6 @@ class Parameter:
             raise ValueError('either of `model_checkpoint_version` or `custom_parameter` is needed.')
 
         self.__parameter = toml.load(open(os.path.join(ABS_PATH_TO_THIS_SCRIPT, "%s.toml" % model_name), "r"))
-        self.__parameter['tfrecord_source'] = os.path.join(root_dir, self.__parameter['tfrecord_source'])
-        self.__parameter['tfrecord_target'] = os.path.join(root_dir, self.__parameter['tfrecord_target'])
         checkpoint_dir = os.path.join(checkpoint_dir, model_name)
 
         if model_checkpoint_version is None:

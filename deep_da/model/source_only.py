@@ -1,26 +1,18 @@
-""" Domain Adversarial Neural Network
-
-Tensorflow implementation of adversarial training based domain adaptation model described in:
-    Ganin, Yaroslav, et al.
-    "Domain-adversarial training of neural networks."
-    The Journal of Machine Learning Research 17.1 (2016): 2096-2030.
-"""
+""" Source only model """
 
 import os
 import numpy as np
 import tensorflow as tf
 from .default_hyperparameter import Parameter
-# from .util.util_tf import variable_summaries, FlipGradientBuilder, StepScheduler, VALID_BASIC_CELL
 from . import util_tf
 from ..util import create_log
 from ..data import SVHN, MNIST
 
-
 DEFAULT_ROOD_DIR = os.path.join(os.path.expanduser("~"), 'deep_da')
 
 
-class DANN:
-    """ Domain Adversarial Neural Network """
+class SourceOnly:
+    """ Source only domain adaptation model """
 
     def __init__(self,
                  model_checkpoint_version: int = None,
@@ -31,10 +23,10 @@ class DANN:
         root_dir = root_dir if root_dir is not None else DEFAULT_ROOD_DIR
         checkpoint_dir = os.path.join(root_dir, 'checkpoint')
         if model_checkpoint_version is None:
-            param_instance = Parameter('dann', checkpoint_dir=checkpoint_dir, custom_parameter=kwargs)
+            param_instance = Parameter('source_only', checkpoint_dir=checkpoint_dir, custom_parameter=kwargs)
         else:
             param_instance = Parameter(
-                'dann', checkpoint_dir=checkpoint_dir, model_checkpoint_version=model_checkpoint_version)
+                'source_only', checkpoint_dir=checkpoint_dir, model_checkpoint_version=model_checkpoint_version)
         self.__learning_rate = param_instance('learning_rate')
         self.__batch = param_instance('batch')
         self.__optimizer = param_instance('optimizer')
@@ -56,12 +48,12 @@ class DANN:
         else:
             raise ValueError('undefined: %s' % self.__target_source)
 
-        self.__config_regularizer_feature_extractor = param_instance('config_regularizer_feature_extractor')
+        # self.__config_regularizer_feature_extractor = param_instance('config_regularizer_feature_extractor')
         self.__checkpoint_path = param_instance.checkpoint_path
 
         # create tensorflow graph
         self.__logger = create_log(os.path.join(self.__checkpoint_path, 'log.log'))
-        self.__logger.info('BUILD DANN TENSORFLOW GRAPH')
+        self.__logger.info('BUILD SOURCE ONLY MODEL TENSORFLOW GRAPH')
         self.__build_graph()
         self.__session = tf.Session(config=tf.ConfigProto(log_device_placement=False))
         self.__writer = tf.summary.FileWriter('%s/summary' % self.__checkpoint_path, self.__session.graph)
@@ -74,7 +66,7 @@ class DANN:
         else:
             self.__session.run(tf.global_variables_initializer())
             self.__warm_start = False
-        
+
     @staticmethod
     def __feature_extractor(image,
                             keep_prob=None,
@@ -98,8 +90,8 @@ class DANN:
                 if n == layer_n - 1:  # don't put max pool on last layer
                     image = tf.nn.max_pool(
                         image, ksize=[1, 2, 2, 1], strides=[1, 2, 2, 1], padding='SAME')
-            feature = tf.reshape(image, shape=[-1, np.prod(image.get_shape().as_list()[1:])])
-            return feature
+            fature = tf.reshape(image, shape=[-1, np.prod(image.get_shape().as_list()[1:])])
+            return fature
 
     @staticmethod
     def __classifier(feature,
@@ -141,7 +133,6 @@ class DANN:
         self.target_image = tf.placeholder(tf.float32, shape=self.__size_target, name='target_image')
         self.source_label = tf.placeholder(tf.float32, shape=[None, 10], name='source_label')
         self.target_label = tf.placeholder(tf.float32, shape=[None, 10], name='target_label')
-        self.regularizer_feature_extraction = tf.placeholder(tf.float32, name='regularizer_feature_extraction')
         self.is_training = tf.placeholder_with_default(False, [])
         __keep_prob = tf.where(self.is_training, self.__keep_prob, 1.0)
         __weight_decay = tf.where(self.is_training, self.__weight_decay, 0.0)
@@ -176,9 +167,9 @@ class DANN:
         with tf.variable_scope('domain_classification', initializer=initializer):
             flip_grad = util_tf.FlipGradientBuilder()
             source_domain_prob = self.__domain_classifier(
-                flip_grad(source_feature, scale=self.regularizer_feature_extraction))
+                flip_grad(source_feature, scale=0.0))
             target_domain_prob = self.__domain_classifier(
-                flip_grad(target_feature, scale=self.regularizer_feature_extraction), reuse=True)
+                flip_grad(target_feature, scale=0.0), reuse=True)
 
             # loss for domain classification and feature extractor: target (1), source (0)
             loss_source_domain = - tf.reduce_mean(tf.log(source_domain_prob + 1e-6))
@@ -228,7 +219,6 @@ class DANN:
 
         # scalar summary
         self.__summary_train = tf.summary.merge([
-            tf.summary.scalar('train_meta_r_feature_extraction', self.regularizer_feature_extraction),
             tf.summary.scalar('train_meta_keep_prob', __keep_prob),
             tf.summary.scalar('train_meta_weight_decay', __weight_decay),
             tf.summary.scalar('train_eval_loss_source', loss_source),
@@ -276,10 +266,9 @@ class DANN:
 
         logger.info('checkpoint (%s), epoch (%i)' % (self.__checkpoint_path, epoch))
         logger.info('- accuracy: source_train - target_train - source_valid - source_valid')
-        scheduler_r_fe = util_tf.StepScheduler(current_epoch=ini_epoch, **self.__config_regularizer_feature_extractor)
         e = -1
         try:
-            for e in range(ini_epoch, ini_epoch+epoch):
+            for e in range(ini_epoch, ini_epoch + epoch):
 
                 # training
                 self.iterator_source.set_data_type('train')
@@ -296,10 +285,10 @@ class DANN:
                             self.source_label: label_source,
                             self.target_image: image_target,
                             self.target_label: label_target,
-                            self.regularizer_feature_extraction: scheduler_r_fe(),
                             self.is_training: True
                         }
-                        feed_val = [self.__summary_train, self.__accuracy_source, self.__accuracy_target, self.__train_op]
+                        feed_val = [self.__summary_train, self.__accuracy_source, self.__accuracy_target,
+                                    self.__train_op]
                         output = self.__session.run(feed_val, feed_dict=feed_dict)
                         self.__writer.add_summary(output[0], i_summary_train)  # write tensorboard writer
                         accuracy_source.append(output[1])
@@ -325,7 +314,6 @@ class DANN:
                             self.source_label: label_source,
                             self.target_image: image_target,
                             self.target_label: label_target,
-                            self.regularizer_feature_extraction: 0.0,
                             self.is_training: False
                         }
                         feed_val = [self.__summary_valid, self.__accuracy_source, self.__accuracy_target]
@@ -340,10 +328,12 @@ class DANN:
                         break
 
                 logger.info('epoch %i/%i: %0.2f, %0.2f, %0.2f, %0.2f'
-                            % (e, ini_epoch+epoch,
-                               accuracy_source_train, accuracy_target_train, accuracy_source_valid, accuracy_target_valid))
+                            % (e, ini_epoch + epoch,
+                               accuracy_source_train, accuracy_target_train, accuracy_source_valid,
+                               accuracy_target_valid))
                 if e % 20 == 0:  # every 20 epoch, save statistics of weights
-                    summary_train_var = self.__session.run(self.__summary_train_var, feed_dict={self.is_training: False})
+                    summary_train_var = self.__session.run(self.__summary_train_var,
+                                                           feed_dict={self.is_training: False})
                     self.__writer.add_summary(summary_train_var, i_summary_train_var)  # write tensorboard writer
                     i_summary_train_var += 1  # time stamp for tf summary
 
